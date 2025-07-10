@@ -1,0 +1,114 @@
+# session_zero.py
+
+import json
+from gpt_interface.gpt_client import call_chat_model
+from db.schema import Session as SessionModel, PlayerState
+from sqlalchemy.orm import Session as DBSession
+
+def prompt_user(question):
+    print(f"\n{question}")
+    return input("> ").strip()
+
+def run_session_zero(db: DBSession):
+    print("\n🎲 Welcome to Session Zero...")
+    print("Let’s shape the world you’ll be adventuring in.")
+
+    # Step 1: Gather world parameters
+    genre = prompt_user("What genre do you want? (e.g., fantasy, sci-fi, horror)")
+    tone = prompt_user("What should the tone be? (e.g., dark, heroic, comedic)")
+    realism = prompt_user("Should the world follow grounded realism? (yes/no)").lower() in ["yes", "y"]
+    pf = prompt_user("Enable power fantasy mode (you rarely fail)? (yes/no)").lower() in ["yes", "y"]
+
+    config_text = f"Genre: {genre}\nTone: {tone}\nRealism: {realism}\nPower Fantasy: {pf}"
+
+    # Step 2: Generate world intro
+    world_intro = call_chat_model(
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a cinematic RPG narrator. Create a compelling introduction to a new world based on the following configuration."
+            },
+            {
+                "role": "user",
+                "content": f"""Create a short world introduction based on the following settings:
+{config_text}
+
+Make it feel like a GM speaking to the player at the start of a brand new campaign."""
+            }
+        ],
+        model="gpt4o",
+        temperature=0.9,
+        max_tokens=400
+    )
+
+    print("\n🎬 Your world is ready:\n")
+    print(world_intro)
+
+    # Step 3: Save session
+    new_session = SessionModel(
+        genre=genre,
+        tone=tone,
+        realism=realism,
+        power_fantasy=pf
+    )
+    db.add(new_session)
+    db.commit()
+
+    # Step 4: Generate player state using GPT-4o
+    player_prompt = f"""Based on the world described below, create a detailed character sheet for the player.
+
+World Introduction:
+{world_intro}
+
+Use this JSON format:
+{{
+  "name": "...",
+  "race": "...",
+  "character_class": "...",
+  "backstory": "...",
+  "attributes": {{
+    "strength": number,
+    "dexterity": number,
+    "intelligence": number
+  }},
+  "skills": {{
+    "skill name": numeric score from 1 to 100
+  }},
+  "inventory": ["...", "..."],
+  "limitations": ["...", "..."]
+}}
+
+Explain any exotic abilities or limitations narratively.
+"""
+
+    raw_player_state = call_chat_model(
+        messages=[
+            {"role": "system", "content": "You are building the player's character sheet for a serious RPG campaign. Stick to the format."},
+            {"role": "user", "content": player_prompt}
+        ],
+        model="gpt4o",
+        temperature=0.7,
+        max_tokens=600
+    )
+
+    try:
+        parsed = json.loads(raw_player_state)
+        player = PlayerState(
+            session_id=new_session.id,
+            name=parsed["name"],
+            race=parsed["race"],
+            character_class=parsed["character_class"],
+            backstory=parsed["backstory"],
+            attributes=parsed["attributes"],
+            skills=parsed["skills"],
+            inventory=parsed["inventory"],
+            limitations=parsed["limitations"]
+        )
+        db.add(player)
+        db.commit()
+        print(f"\n✅ Player created: {player.name}, the {player.race} {player.character_class}")
+    except Exception as e:
+        print("❌ Failed to parse player state:", e)
+        print("Raw output:", raw_player_state)
+
+    print("\n✅ Session and character setup complete. You may now begin your journey.")

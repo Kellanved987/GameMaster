@@ -1,0 +1,30 @@
+# prompt_builder/builder.py
+
+from memory.retrieve import retrieve_relevant_chunks
+from memory.relevance_filter import filter_relevant_chunks
+
+from db.schema import NPC, Quest, WorldFlag, Session
+from sqlalchemy.orm import Session as DBSession
+
+def build_prompt(db: DBSession, session_id: int, player_input: str) -> str:
+    # Memory
+    raw_chunks = retrieve_relevant_chunks(player_input)
+    memory = filter_relevant_chunks(player_input, raw_chunks)
+
+    # Structured state
+    npcs = db.query(NPC).filter_by(session_id=session_id).all()
+    quests = db.query(Quest).filter_by(session_id=session_id).all()
+    flags = db.query(WorldFlag).filter_by(session_id=session_id).all()
+    config = db.query(Session).get(session_id)
+
+    # Assemble prompt
+    prompt_sections = [
+        "[Player Input]\n" + player_input.strip(),
+        "\n[Relevant Memory]\n" + "\n".join(c["text"] for c in memory),
+        "\n[NPCs]\n" + "\n".join(f"{n.name} ({n.role}) - {n.status}" for n in npcs),
+        "\n[Quests]\n" + "\n".join(f"{q.name}: {q.status}" for q in quests),
+        "\n[World Flags]\n" + "\n".join(f"{f.key} = {f.value}" for f in flags),
+        "\n[Session Config]\n" + f"Genre: {config.genre}\nTone: {config.tone}\nRealism: {config.realism}\nPower Fantasy: {config.power_fantasy}"
+    ]
+
+    return "\n\n".join(prompt_sections)

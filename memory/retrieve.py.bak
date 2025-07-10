@@ -1,0 +1,20 @@
+# memory/retrieve.py
+
+from memory.vector_store import load_index
+from memory.embeddings import embed_text
+import numpy as np
+
+def retrieve_relevant_chunks(user_input, top_k=8):
+    index, chunks = load_index()
+    if not index or not chunks:
+        return []
+
+    query_vec = embed_text([user_input])
+    distances, indices = index.search(query_vec, top_k)
+
+    relevant = []
+    for i in indices[0]:
+        if i < len(chunks):
+            relevant.append(chunks[i])
+
+    return relevant

@@ -1,0 +1,47 @@
+# main.py
+
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from db.schema import Base, Session as SessionModel
+from prompt_builder.builder import build_prompt
+from gpt_interface.gpt_client import call_chat_model
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DB_PATH = os.getenv("DB_PATH", "game_master.db")
+engine = create_engine(f"sqlite:///{DB_PATH}")
+SessionLocal = sessionmaker(bind=engine)
+
+def get_active_session_id(db):
+    session = db.query(SessionModel).first()
+    if not session:
+        print("No session found. Please create one manually in DB.")
+        exit()
+    return session.id
+
+def main():
+    db = SessionLocal()
+
+    session_id = get_active_session_id(db)
+    print("AI GM loaded. Type your action.")
+
+    while True:
+        player_input = input("\n> ").strip()
+        if player_input.lower() in {"quit", "exit"}:
+            break
+
+        full_prompt = build_prompt(db, session_id, player_input)
+
+        messages = [
+            {"role": "system", "content": "You are the player's AI game master. Narrate events with cinematic detail and respond to their actions within the current scene."},
+            {"role": "user", "content": full_prompt}
+        ]
+
+        gm_reply = call_chat_model(messages, model="gpt4o")
+        print(f"\n🧠 GM:\n{gm_reply}")
+
+if __name__ == "__main__":
+    main()

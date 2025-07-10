@@ -1,0 +1,46 @@
+# memory/relevance_filter.py
+
+from gpt_interface.gpt_client import call_chat_model
+
+def filter_relevant_chunks(user_input, chunks, top_n=5):
+    if not chunks:
+        return []
+
+    # Normalize chunk format
+    text_chunks = [
+        c["text"].strip() if isinstance(c, dict) and "text" in c else str(c).strip()
+        for c in chunks
+    ]
+    numbered = [f"{i+1}. {chunk}" for i, chunk in enumerate(text_chunks)]
+    formatted_chunks = "\n".join(numbered)
+
+    system_prompt = (
+        "You are an intelligent memory assistant. "
+        "Your job is to identify which pieces of prior memory are most relevant to the current user input."
+    )
+
+    user_prompt = f"""
+Current player input: "{user_input.strip()}"
+
+Prior memory:
+{formatted_chunks}
+
+From the above list, select the {top_n} most relevant memory snippets. 
+Return only the corresponding numbers as a comma-separated list.
+"""
+
+    response = call_chat_model(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt.strip()}
+        ],
+        model="gpt35",
+        temperature=0.2,
+        max_tokens=50
+    )
+
+    try:
+        selected_indices = [int(x.strip()) - 1 for x in response.split(",") if x.strip().isdigit()]
+        return [chunks[i] for i in selected_indices if 0 <= i < len(chunks)]
+    except Exception:
+        return chunks[:top_n]

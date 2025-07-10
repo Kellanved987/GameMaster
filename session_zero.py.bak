@@ -1,0 +1,126 @@
+# session_zero.py
+
+import json
+from gpt_interface.gpt_client import call_chat_model
+from db.schema import Session as SessionModel, NPC, Quest, WorldFlag
+from sqlalchemy.orm import Session as DBSession
+
+def prompt_user(question):
+    print(f"\n{question}")
+    return input("> ").strip()
+
+def run_session_zero(db: DBSession):
+    print("\n🎲 Welcome to Session Zero...")
+    print("Let’s shape the world you’ll be adventuring in.")
+
+    # Step 1: Gather world parameters
+    genre = prompt_user("What genre do you want? (e.g., fantasy, sci-fi, horror)")
+    tone = prompt_user("What should the tone be? (e.g., dark, heroic, comedic)")
+    realism = prompt_user("Should the world follow grounded realism? (yes/no)").lower() in ["yes", "y"]
+    pf = prompt_user("Enable power fantasy mode (you rarely fail)? (yes/no)").lower() in ["yes", "y"]
+
+    # Step 2: Ask GPT for a cinematic world intro
+    system_intro = "You are a cinematic RPG narrator. Create a compelling introduction to a new world based on the following configuration."
+    config_text = f"Genre: {genre}\nTone: {tone}\nRealism: {realism}\nPower Fantasy: {pf}"
+
+    user_intro = f"""Create a short world introduction based on the following settings:
+{config_text}
+
+Make it feel like a GM speaking to the player at the start of a brand new campaign."""
+
+    intro = call_chat_model(
+        messages=[
+            {"role": "system", "content": system_intro},
+            {"role": "user", "content": user_intro}
+        ],
+        model="gpt4o",
+        temperature=0.9,
+        max_tokens=400
+    )
+
+    print("\n🎬 Your world is ready:\n")
+    print(intro)
+
+    # Step 3: Save session config
+    new_session = SessionModel(
+        genre=genre,
+        tone=tone,
+        realism=realism,
+        power_fantasy=pf
+    )
+    db.add(new_session)
+    db.commit()
+    db.refresh(new_session)
+
+    # Step 4: Ask GPT for a starter NPC, quest, and flag
+    system_seed = "You are an RPG worldbuilder AI. Based on the configuration below, generate a suitable NPC, starting quest, and world flag. Format as JSON."
+    seed_prompt = f"""World Configuration:
+{config_text}
+
+Please return JSON in this format:
+
+{{
+  "npc": {{
+    "name": "Name",
+    "role": "Brief role",
+    "motivation": "What they want",
+    "faction": "Their group or allegiance",
+    "status": "Brief current condition"
+  }},
+  "quest": {{
+    "name": "Quest Title",
+    "status": "Offered",
+    "milestones": {{
+      "start": "What begins the quest",
+      "middle": "What complicates it",
+      "end": "What resolves it"
+    }}
+  }},
+  "flag": {{
+    "key": "simple_state_flag",
+    "value": "string or boolean"
+  }}
+}}"""
+
+    response = call_chat_model(
+        messages=[
+            {"role": "system", "content": system_seed},
+            {"role": "user", "content": seed_prompt}
+        ],
+        model="gpt4o",
+        temperature=0.7,
+        max_tokens=600
+    )
+
+    try:
+        data = json.loads(response)
+        npc = NPC(
+            session_id=new_session.id,
+            name=data["npc"]["name"],
+            role=data["npc"]["role"],
+            motivation=data["npc"]["motivation"],
+            faction=data["npc"]["faction"],
+            status=data["npc"]["status"]
+        )
+
+        quest = Quest(
+            session_id=new_session.id,
+            name=data["quest"]["name"],
+            status=data["quest"]["status"],
+            milestones=data["quest"]["milestones"]
+        )
+
+        flag = WorldFlag(
+            session_id=new_session.id,
+            key=data["flag"]["key"],
+            value=data["flag"]["value"]
+        )
+
+        db.add_all([npc, quest, flag])
+        db.commit()
+
+        print("\n✅ AI-generated world state seeded successfully.")
+
+    except (json.JSONDecodeError, KeyError) as e:
+        print("\n⚠️ GPT response could not be parsed. Please try again or check logs.")
+        print("Raw response:\n", response)
