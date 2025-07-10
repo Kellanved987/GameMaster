@@ -1,20 +1,13 @@
 # memory/retrieve.py
 
-from memory.vector_store import load_index
-from memory.embeddings import embed_text
-import numpy as np
+from memory.index import search_chunks
+from memory.relevance_filter import filter_relevant_chunks
 
-def retrieve_relevant_chunks(user_input, top_k=8):
-    index, chunks = load_index()
-    if not index or not chunks:
-        return []
-
-    query_vec = embed_text([user_input])
-    distances, indices = index.search(query_vec, top_k)
-
-    relevant = []
-    for i in indices[0]:
-        if i < len(chunks):
-            relevant.append(chunks[i])
-
-    return relevant
+def retrieve_relevant_chunks(user_input: str, session_id: int, top_k: int = 8):
+    """
+    Retrieves top-k relevant memory chunks for the given session and query.
+    Uses vector similarity + GPT relevance filter.
+    """
+    rough_matches = search_chunks(user_input, session_id, k=top_k)
+    refined = filter_relevant_chunks(user_input, rough_matches, top_n=5)
+    return [{"text": chunk} for chunk in refined]

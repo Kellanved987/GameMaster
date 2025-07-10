@@ -24,13 +24,5 @@ def add_chunks(chunks: list[str], session_id: int):
 def search_chunks(query: str, session_id: int, k: int = 5) -> list[str]:
     index, id_to_chunk = _get_or_create_index(session_id)
     query_vec = embed_text([query])
-
-    # Make sure we don't ask for more chunks than exist
-    k = min(k, len(id_to_chunk))
-    if k == 0:
-        return []
-
     D, I = index.search(np.array(query_vec), k)
-
-    # Filter out invalid indices
-    return [id_to_chunk[i] for i in I[0] if 0 <= i < len(id_to_chunk)]
+    return [id_to_chunk[i] for i in I[0] if i < len(id_to_chunk)]

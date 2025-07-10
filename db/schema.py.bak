@@ -4,6 +4,8 @@ from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean,
     Text, DateTime, ForeignKey
 )
+from sqlalchemy import Column, Integer, String, Boolean, Text, ForeignKey, JSON
+
 from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
@@ -105,7 +107,7 @@ class PlayerState(Base):
     character_class = Column(String)
     backstory = Column(Text)
     attributes = Column(JSON)     # {"strength": 10, "dexterity": 14, ...}
-    skills = Column(JSON)         # {"healing magic": 37, "alchemy": 12}
+    skills = Column(JSON)         # ["lockpicking", "tracking"]
     inventory = Column(JSON)      # ["dagger", "rope"]
     limitations = Column(JSON)    # ["no magic", "hunted in Duskport"]
 

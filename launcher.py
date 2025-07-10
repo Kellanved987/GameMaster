@@ -1,0 +1,50 @@
+# launcher.py
+
+import streamlit as st
+import os
+from dotenv import load_dotenv
+load_dotenv()
+from sqlalchemy.orm import Session as DBSession
+from db.engine import get_engine
+from db.schema import Session as SessionModel, PlayerState
+from session_zero import run_session_zero
+from game_loop import run_game_loop
+
+from sqlalchemy.orm import sessionmaker
+
+SessionFactory = sessionmaker(bind=get_engine())
+
+st.set_page_config(page_title="AI RPG GM", layout="centered")
+st.title("🎮 AI RPG Game Master")
+
+with SessionFactory() as db:
+    sessions = db.query(SessionModel).order_by(SessionModel.id).all()
+    session_map = {f"{s.id} - {s.genre} ({s.tone})": s.id for s in sessions}
+
+    st.subheader("Start or Continue a Game")
+
+    selected = st.selectbox("Choose a session to continue:", ["— New Game —"] + list(session_map.keys()))
+
+    if st.button("Continue"):
+        if selected == "— New Game —":
+            run_session_zero(db)
+        else:
+            session_id = session_map[selected]
+            run_game_loop(db, session_id)
+
+    st.divider()
+
+    if st.checkbox("🔍 View Player State"):
+        if selected != "— New Game —":
+            sid = session_map[selected]
+            player = db.query(PlayerState).filter_by(session_id=sid).first()
+            if player:
+                st.text(f"Name: {player.name} ({player.character_class})")
+                st.text(f"Race: {player.race}")
+                st.text_area("Backstory", player.backstory)
+                st.json({
+                    "Attributes": player.attributes,
+                    "Skills": player.skills,
+                    "Inventory": player.inventory,
+                    "Limitations": player.limitations
+                })

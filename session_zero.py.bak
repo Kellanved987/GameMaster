@@ -1,13 +1,21 @@
 # session_zero.py
 
 import json
+import re
 from gpt_interface.gpt_client import call_chat_model
-from db.schema import Session as SessionModel, NPC, Quest, WorldFlag
+from db.schema import Session as SessionModel, PlayerState
 from sqlalchemy.orm import Session as DBSession
 
 def prompt_user(question):
     print(f"\n{question}")
     return input("> ").strip()
+
+def extract_json_block(text):
+    """Safely extract first valid JSON block from GPT response"""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        raise ValueError("No JSON block found in response.")
+    return json.loads(match.group(0))
 
 def run_session_zero(db: DBSession):
     print("\n🎲 Welcome to Session Zero...")
@@ -19,19 +27,22 @@ def run_session_zero(db: DBSession):
     realism = prompt_user("Should the world follow grounded realism? (yes/no)").lower() in ["yes", "y"]
     pf = prompt_user("Enable power fantasy mode (you rarely fail)? (yes/no)").lower() in ["yes", "y"]
 
-    # Step 2: Ask GPT for a cinematic world intro
-    system_intro = "You are a cinematic RPG narrator. Create a compelling introduction to a new world based on the following configuration."
     config_text = f"Genre: {genre}\nTone: {tone}\nRealism: {realism}\nPower Fantasy: {pf}"
 
-    user_intro = f"""Create a short world introduction based on the following settings:
+    # Step 2: Generate world intro
+    world_intro = call_chat_model(
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a cinematic RPG narrator. Create a compelling introduction to a new world based on the following configuration."
+            },
+            {
+                "role": "user",
+                "content": f"""Create a short world introduction based on the following settings:
 {config_text}
 
 Make it feel like a GM speaking to the player at the start of a brand new campaign."""
-
-    intro = call_chat_model(
-        messages=[
-            {"role": "system", "content": system_intro},
-            {"role": "user", "content": user_intro}
+            }
         ],
         model="gpt4o",
         temperature=0.9,
@@ -39,9 +50,9 @@ Make it feel like a GM speaking to the player at the start of a brand new campai
     )
 
     print("\n🎬 Your world is ready:\n")
-    print(intro)
+    print(world_intro)
 
-    # Step 3: Save session config
+    # Step 3: Save session
     new_session = SessionModel(
         genre=genre,
         tone=tone,
@@ -50,42 +61,38 @@ Make it feel like a GM speaking to the player at the start of a brand new campai
     )
     db.add(new_session)
     db.commit()
-    db.refresh(new_session)
 
-    # Step 4: Ask GPT for a starter NPC, quest, and flag
-    system_seed = "You are an RPG worldbuilder AI. Based on the configuration below, generate a suitable NPC, starting quest, and world flag. Format as JSON."
-    seed_prompt = f"""World Configuration:
-{config_text}
+    # Step 4: Generate player state using GPT-4o
+    player_prompt = f"""Based on the world described below, create a detailed character sheet for the player.
 
-Please return JSON in this format:
+World Introduction:
+{world_intro}
 
+Use this JSON format:
 {{
-  "npc": {{
-    "name": "Name",
-    "role": "Brief role",
-    "motivation": "What they want",
-    "faction": "Their group or allegiance",
-    "status": "Brief current condition"
+  "name": "...",
+  "race": "...",
+  "character_class": "...",
+  "backstory": "...",
+  "attributes": {{
+    "strength": number,
+    "dexterity": number,
+    "intelligence": number
   }},
-  "quest": {{
-    "name": "Quest Title",
-    "status": "Offered",
-    "milestones": {{
-      "start": "What begins the quest",
-      "middle": "What complicates it",
-      "end": "What resolves it"
-    }}
+  "skills": {{
+    "skill name": numeric score from 1 to 100
   }},
-  "flag": {{
-    "key": "simple_state_flag",
-    "value": "string or boolean"
-  }}
-}}"""
+  "inventory": ["...", "..."],
+  "limitations": ["...", "..."]
+}}
 
-    response = call_chat_model(
+Explain any exotic abilities or limitations narratively *after* the JSON, as prose text.
+"""
+
+    raw_player_state = call_chat_model(
         messages=[
-            {"role": "system", "content": system_seed},
-            {"role": "user", "content": seed_prompt}
+            {"role": "system", "content": "You are building the player's character sheet for a serious RPG campaign. Stick to the format."},
+            {"role": "user", "content": player_prompt}
         ],
         model="gpt4o",
         temperature=0.7,
@@ -93,34 +100,23 @@ Please return JSON in this format:
     )
 
     try:
-        data = json.loads(response)
-        npc = NPC(
+        parsed = extract_json_block(raw_player_state)
+        player = PlayerState(
             session_id=new_session.id,
-            name=data["npc"]["name"],
-            role=data["npc"]["role"],
-            motivation=data["npc"]["motivation"],
-            faction=data["npc"]["faction"],
-            status=data["npc"]["status"]
+            name=parsed["name"],
+            race=parsed["race"],
+            character_class=parsed["character_class"],
+            backstory=parsed["backstory"],
+            attributes=parsed["attributes"],
+            skills=parsed["skills"],
+            inventory=parsed["inventory"],
+            limitations=parsed["limitations"]
         )
-
-        quest = Quest(
-            session_id=new_session.id,
-            name=data["quest"]["name"],
-            status=data["quest"]["status"],
-            milestones=data["quest"]["milestones"]
-        )
-
-        flag = WorldFlag(
-            session_id=new_session.id,
-            key=data["flag"]["key"],
-            value=data["flag"]["value"]
-        )
-
-        db.add_all([npc, quest, flag])
+        db.add(player)
         db.commit()
+        print(f"\n✅ Player created: {player.name}, the {player.race} {player.character_class}")
+    except Exception as e:
+        print("❌ Failed to parse player state:", e)
+        print("Raw output:", raw_player_state)
 
-        print("\n✅ AI-generated world state seeded successfully.")
-
-    except (json.JSONDecodeError, KeyError) as e:
-        print("\n⚠️ GPT response could not be parsed. Please try again or check logs.")
-        print("Raw response:\n", response)
+    print("\n✅ Session and character setup complete. You may now begin your journey.")

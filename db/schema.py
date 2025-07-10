@@ -4,6 +4,8 @@ from sqlalchemy import (
     create_engine, Column, Integer, String, Boolean,
     Text, DateTime, ForeignKey
 )
+from sqlalchemy import Column, Integer, String, Boolean, Text, ForeignKey, JSON
+
 from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
@@ -94,6 +96,7 @@ class Turn(Base):
     prompt_used = Column(Text)
     summary = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    prompt_snapshot = Column(Text)  # Stores full prompt sent to GPT
 
 class PlayerState(Base):
     __tablename__ = "player_state"
