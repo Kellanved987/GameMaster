@@ -123,7 +123,7 @@ def update_npc_motivation(db_session: DBSession, session_id: int, npc_name: str,
         return f"Success: NPC '{npc_name}' motivation changed to '{new_motivation}' because: {reason}"
     return f"Error: NPC '{npc_name}' not found."
 
-def finalize_character_and_world(db_session: DBSession, genre: str, tone: str, world_intro: str, player_name: str, backstory: str, attributes: dict, skills: list):
+def finalize_character_and_world(db_session: DBSession, genre: str, tone: str, world_intro: str, player_name: str, backstory: str, attributes: dict, skills: dict):
     """
     Finalizes and saves the world and character after a collaborative session zero conversation.
     This is the final step. Call this only when the player has confirmed all details are correct.
@@ -133,7 +133,9 @@ def finalize_character_and_world(db_session: DBSession, genre: str, tone: str, w
         db_session.add(new_session)
         db_session.commit()
 
-        skills_dict = {skill: 15 for skill in skills}
+        # --- FIX: Convert the special API objects into standard Python dictionaries ---
+        final_attributes = dict(attributes)
+        final_skills = dict(skills)
 
         player = PlayerState(
             session_id=new_session.id,
@@ -141,8 +143,8 @@ def finalize_character_and_world(db_session: DBSession, genre: str, tone: str, w
             race="Not specified",
             character_class="Not specified",
             backstory=backstory,
-            attributes=attributes,
-            skills=skills_dict,
+            attributes=final_attributes, # Use the converted dictionary
+            skills=final_skills,       # Use the converted dictionary
             inventory=["Traveler's clothes", "Backpack", "Rations (3 days)"],
             limitations=[]
         )
