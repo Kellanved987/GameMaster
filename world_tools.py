@@ -2,7 +2,7 @@
 
 from sqlalchemy.orm import Session as DBSession
 # Note: You may need to adjust these imports based on your exact schema file location
-from db.schema import Quest, NPC, WorldFlag, Rumor, PlayerState, JournalEntry, ConversationContext, SessionModel
+from db.schema import Quest, NPC, WorldFlag, Rumor, PlayerState, JournalEntry, ConversationContext, Session as SessionModel
 from datetime import datetime
 from google.generativeai.types import FunctionDeclaration, Tool
 
@@ -76,16 +76,23 @@ def update_player_character(db_session: DBSession, session_id: int, skill_update
         return "Error: Player state not found."
 
     if skill_updates:
-        for skill, new_val in skill_updates.items():
-            player.skills[skill] = new_val
+        # This is a mutable JSON field, so we need to mark it as modified.
+        # A simple way is to re-assign it.
+        current_skills = player.skills or {}
+        current_skills.update(skill_updates)
+        player.skills = current_skills
 
     if new_inventory_items:
-        player.inventory.extend(i for i in new_inventory_items if i not in player.inventory)
+        current_inventory = player.inventory or []
+        current_inventory.extend(i for i in new_inventory_items if i not in current_inventory)
+        player.inventory = current_inventory
 
     if new_limitations:
-        player.limitations.extend(l for l in new_limitations if l not in player.limitations)
+        current_limitations = player.limitations or []
+        current_limitations.extend(l for l in new_limitations if l not in current_limitations)
+        player.limitations = current_limitations
 
-    db_session.commit()
+    db.commit()
     return f"Success: Player state updated. Skills: {skill_updates}, Items: {new_inventory_items}, Limitations: {new_limitations}"
 
 def create_journal_entry(db_session: DBSession, session_id: int, turn_number: int, summary_text: str):
@@ -143,6 +150,8 @@ def finalize_character_and_world(db_session: DBSession, genre: str, tone: str, w
         db_session.commit()
         return f"Success: World and character for {player_name} have been created. The adventure can now begin! New session ID is {new_session.id}"
     except Exception as e:
+        db_session.rollback()
+        print(f"ERROR in finalize_character_and_world: {e}")
         return f"Error finalizing character: {e}"
 
 def save_dialogue_context(db_session: DBSession, session_id: int, npc_name: str, topic: str, dialogue_summary: str):
@@ -151,7 +160,11 @@ def save_dialogue_context(db_session: DBSession, session_id: int, npc_name: str,
     """
     npc = db_session.query(NPC).filter_by(session_id=session_id, name=npc_name).first()
     if not npc:
-        return f"Error: NPC '{npc_name}' not found. Dialogue context not saved."
+        # Let's create the NPC if it doesn't exist. This can happen in early turns.
+        npc = NPC(session_id=session_id, name=npc_name, role="Unknown", motivation="Unknown", status="active")
+        db_session.add(npc)
+        db_session.commit()
+
 
     context = db_session.query(ConversationContext).filter_by(session_id=session_id, npc_id=npc.id).first()
     if context:
@@ -172,7 +185,6 @@ def save_dialogue_context(db_session: DBSession, session_id: int, npc_name: str,
 
 def select_relevant_memories(memory_indices: list[int]):
     """
-
     Selects a list of relevant memory chunks based on their indices.
     The AI should call this function with a list of integers corresponding to the memories it deems most relevant.
     """
@@ -275,5 +287,5 @@ FUNCTION_HANDLERS = {
     "update_npc_motivation": update_npc_motivation,
     "finalize_character_and_world": finalize_character_and_world,
     "save_dialogue_context": save_dialogue_context,
-    "select_relevant_memies": select_relevant_memories,
+    "select_relevant_memories": select_relevant_memories,
 }
