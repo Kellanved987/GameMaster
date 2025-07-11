@@ -11,7 +11,7 @@ recent_turn_limit = 3
 
 def build_prompt(db: DBSession, session_id: int, player_input: str) -> str:
     # Memory
-    raw_chunks = retrieve_relevant_chunks(session_id, player_input)
+    raw_chunks = retrieve_relevant_chunks(player_input, session_id)
     memory = filter_relevant_chunks(player_input, raw_chunks)
 
     # Recent Dialogue
