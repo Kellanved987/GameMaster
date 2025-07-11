@@ -1,46 +1,42 @@
 # memory/relevance_filter.py
 
-from gpt_interface.gpt_client import call_chat_model
+from gemini_interface.gemini_client import call_gemini_with_tools
 
-def filter_relevant_chunks(user_input, chunks, top_n=5):
+def filter_relevant_chunks(user_input: str, chunks: list, top_n: int = 5):
+    """
+    Uses Gemini to identify the most relevant memory chunks from a list.
+    """
     if not chunks:
         return []
 
-    # Normalize chunk format
+    # Normalize and number the chunks for the AI to see
     text_chunks = [
-        c["text"].strip() if isinstance(c, dict) and "text" in c else str(c).strip()
+        c["text"].strip() if isinstance(c, dict) else str(c).strip()
         for c in chunks
     ]
-    numbered = [f"{i+1}. {chunk}" for i, chunk in enumerate(text_chunks)]
-    formatted_chunks = "\n".join(numbered)
+    numbered_list = "\n".join(f"{i+1}. {chunk}" for i, chunk in enumerate(text_chunks))
 
-    system_prompt = (
-        "You are an intelligent memory assistant. "
-        "Your job is to identify which pieces of prior memory are most relevant to the current user input."
-    )
+    prompt = f"""
+You are an intelligent memory assistant.
+Your job is to identify which pieces of prior memory are most relevant to the current user input.
+From the numbered list below, select the {top_n} most relevant memory snippets.
+Call the `select_relevant_memories` tool with the corresponding numbers as a list of integers.
 
-    user_prompt = f"""
 Current player input: "{user_input.strip()}"
 
 Prior memory:
-{formatted_chunks}
-
-From the above list, select the {top_n} most relevant memory snippets. 
-Return only the corresponding numbers as a comma-separated list.
+{numbered_list}
 """
+    # Note: Because this tool doesn't use the database, we can pass `None` for the db_session and session_id.
+    # The client needs a slight modification to handle this gracefully.
+    selected_indices = call_gemini_with_tools(None, None, prompt)
 
-    response = call_chat_model(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt.strip()}
-        ],
-        model="gpt35",
-        temperature=0.2,
-        max_tokens=50
-    )
+    # The AI will return a list of integers directly.
+    # We add a check to ensure the response is what we expect.
+    if isinstance(selected_indices, list):
+        # We subtract 1 from the AI's 1-based numbering
+        return [chunks[i - 1] for i in selected_indices if 0 < i <= len(chunks)]
 
-    try:
-        selected_indices = [int(x.strip()) - 1 for x in response.split(",") if x.strip().isdigit()]
-        return [chunks[i] for i in selected_indices if 0 <= i < len(chunks)]
-    except Exception:
-        return chunks[:top_n]
+    # Fallback if the tool call fails for some reason
+    print("Warning: Relevance filter did not return a list. Falling back to top N.")
+    return chunks[:top_n]
