@@ -1,17 +1,51 @@
 # session_zero.py
 
-import os
-import google.generativeai as genai
 from sqlalchemy.orm import Session as DBSession
 from gemini_interface.gemini_client import call_gemini_with_tools
+# --- CHANGE 1: Import the specific tool and handler we need ---
+from world_tools import (
+    finalize_character_and_world,
+    FUNCTION_HANDLERS,
+    Tool,
+    FunctionDeclaration,
+)
 
-# This is the new, single-turn function. No more loops, input(), or print().
-def run_session_zero_turn(db: DBSession, chat_history: list, player_input: str):
+# --- CHANGE 2: Define the minimal toolset for session zero ---
+FINALIZE_TOOL = [
+    Tool(
+        function_declarations=[
+            FunctionDeclaration(
+                name="finalize_character_and_world",
+                description=FUNCTION_HANDLERS["finalize_character_and_world"].__doc__,
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "genre": {"type": "string"},
+                        "tone": {"type": "string"},
+                        "world_intro": {"type": "string"},
+                        "player_name": {"type": "string"},
+                        "backstory": {"type": "string"},
+                        "attributes": {"type": "object"},
+                        "skills": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": [
+                        "genre", "tone", "world_intro", "player_name",
+                        "backstory", "attributes", "skills"
+                    ],
+                },
+            )
+        ]
+    )
+]
+
+# --- CHANGE 3: Update the function to accept a message list ---
+def run_session_zero_turn(db: DBSession, messages: list):
     """
-    Processes a single turn of the Session Zero conversation.
-    Takes the full chat history and new player input, and returns the AI's response.
+    Processes a single turn of the Session Zero conversation using a stateful history.
     """
-    system_instruction = """
+    system_instruction = {
+        "role": "system",
+        "content": """
 You are a friendly and creative guide for Session Zero of a new text-based RPG.
 Your goal is to have a natural conversation with the player to collaboratively build the game world and their character.
 Do NOT ask a list of questions. Ask one open-ended question at a time, then ask clarifying follow-up questions based on the player's response.
@@ -21,9 +55,14 @@ Third, help them define their character's mechanics. Suggest 3-5 starting skills
 Finally, once the player is happy with everything, summarize all the details and call the `finalize_character_and_world` tool to officially create the character and start the game.
 Be engaging, creative, and conversational.
 """
-    # We construct the full prompt from the history and new input
-    full_prompt = f"{system_instruction}\n\n--- Conversation History ---\n{''.join(chat_history)}\n\n--- Your Turn ---\nPlayer: {player_input}\nGuide:"
+    }
 
-    response_text = call_gemini_with_tools(db, None, full_prompt)
-    
+    # Combine system instruction with the message history
+    full_history = [system_instruction] + messages
+
+    # --- CHANGE 4: Call the Gemini client with the history and minimal tool ---
+    response_text = call_gemini_with_tools(
+        db, None, messages=full_history, tools=FINALIZE_TOOL
+    )
+
     return response_text

@@ -1,15 +1,15 @@
-# utils/progression.py (Upgraded)
+# utils/progression.py
 
 import json
 from sqlalchemy.orm import Session as DBSession
 from db.schema import PlayerState, Turn
-from gemini_interface.gemini_client import call_gemini_with_tools # Import our Gemini client
+from gemini_interface.gemini_client import call_gemini_with_tools
 from sqlalchemy import desc
 
 def evaluate_player_growth(db: DBSession, session_id: int, recent_turns: int = 5):
     """
     Evaluates the player's recent actions and calls the update_player_character tool
-    to apply any deserved progression.
+    to apply any deserved progression based on a tiered skill system.
     """
     player = db.query(PlayerState).filter_by(session_id=session_id).first()
     if not player:
@@ -27,25 +27,40 @@ def evaluate_player_growth(db: DBSession, session_id: int, recent_turns: int = 5
         f"Player: {t.player_input}\nGM: {t.gm_response}" for t in turns
     )
 
+    # --- NEW: Updated system prompt with tiered progression rules ---
     prompt = f"""
-You are managing player progression in a long-term RPG campaign.
-Based on the player's recent actions, decide if they have earned any skill increases, new items, or new limitations.
-Only increase skill levels if justified. Typical growth is +1 to +5.
-Use the 'update_player_character' tool to apply these changes.
+You are managing player progression in a long-term RPG campaign that uses a 1-100 skill-based system, similar to the Elder Scrolls.
 
-Player info:
-Name: {player.name}
-Class: {player.character_class}
-Current skills: {json.dumps(player.skills)}
-Current inventory: {json.dumps(player.inventory)}
+**Skill System Rules:**
+- Skills range from 1 to 100.
+- There are six tiers of mastery:
+  - 1-19: Novice
+  - 20-39: Apprentice
+  - 40-59: Adept
+  - 60-79: Expert
+  - 80-99: Master
+  - 100: Grandmaster
+- Reaching a new tier (e.g., hitting 20, 40, 60) is a major milestone and should unlock new capabilities for the player.
+- Award small, incremental skill point increases (+1 to +3) for successfully using a skill. Do not award points for failures.
 
-Recent turns:
+**Your Task:**
+Based on the player's recent actions, decide if they have earned any skill increases.
+If a skill increase pushes them into a new mastery tier, mention this in your reasoning.
+Use the `update_player_character` tool to apply these changes.
+
+**Player Info:**
+- Name: {player.name}
+- Class: {player.character_class}
+- Current Skills: {json.dumps(player.skills)}
+- Current Inventory: {json.dumps(player.inventory)}
+
+**Recent Turns:**
 {turn_summary}
 
-Analyze the player's performance and use the tool if progression is warranted.
+Analyze the player's performance and use the tool if progression is warranted. If no progression is earned, simply state that.
 """
 
     print("\n--- Evaluating Player Progression ---")
-    final_response = call_gemini_with_tools(db, session_id, prompt)
+    final_response = call_gemini_with_tools(db, session_id, [{"role": "user", "content": prompt}])
     print(f"Progression result: {final_response}")
     print("--- Progression Evaluation Complete ---")
