@@ -1,122 +1,29 @@
 # session_zero.py
 
-import json
-import re
-from gpt_interface.gpt_client import call_chat_model
-from db.schema import Session as SessionModel, PlayerState
+import os
+import google.generativeai as genai
 from sqlalchemy.orm import Session as DBSession
+from gemini_interface.gemini_client import call_gemini_with_tools
 
-def prompt_user(question):
-    print(f"\n{question}")
-    return input("> ").strip()
-
-def extract_json_block(text):
-    """Safely extract first valid JSON block from GPT response"""
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        raise ValueError("No JSON block found in response.")
-    return json.loads(match.group(0))
-
-def run_session_zero(db: DBSession):
-    print("\n🎲 Welcome to Session Zero...")
-    print("Let’s shape the world you’ll be adventuring in.")
-
-    # Step 1: Gather world parameters
-    genre = prompt_user("What genre do you want? (e.g., fantasy, sci-fi, horror)")
-    tone = prompt_user("What should the tone be? (e.g., dark, heroic, comedic)")
-    realism = prompt_user("Should the world follow grounded realism? (yes/no)").lower() in ["yes", "y"]
-    pf = prompt_user("Enable power fantasy mode (you rarely fail)? (yes/no)").lower() in ["yes", "y"]
-
-    config_text = f"Genre: {genre}\nTone: {tone}\nRealism: {realism}\nPower Fantasy: {pf}"
-
-    # Step 2: Generate world intro
-    world_intro = call_chat_model(
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a cinematic RPG narrator. Create a compelling introduction to a new world based on the following configuration."
-            },
-            {
-                "role": "user",
-                "content": f"""Create a short world introduction based on the following settings:
-{config_text}
-
-Make it feel like a GM speaking to the player at the start of a brand new campaign."""
-            }
-        ],
-        model="gpt4o",
-        temperature=0.9,
-        max_tokens=400
-    )
-
-    print("\n🎬 Your world is ready:\n")
-    print(world_intro)
-
-    # Step 3: Save session
-    new_session = SessionModel(
-        genre=genre,
-        tone=tone,
-        realism=realism,
-        power_fantasy=pf
-    )
-    db.add(new_session)
-    db.commit()
-
-    # Step 4: Generate player state using GPT-4o
-    player_prompt = f"""Based on the world described below, create a detailed character sheet for the player.
-
-World Introduction:
-{world_intro}
-
-Use this JSON format:
-{{
-  "name": "...",
-  "race": "...",
-  "character_class": "...",
-  "backstory": "...",
-  "attributes": {{
-    "strength": number,
-    "dexterity": number,
-    "intelligence": number
-  }},
-  "skills": {{
-    "skill name": numeric score from 1 to 100
-  }},
-  "inventory": ["...", "..."],
-  "limitations": ["...", "..."]
-}}
-
-Explain any exotic abilities or limitations narratively *after* the JSON, as prose text.
+# This is the new, single-turn function. No more loops, input(), or print().
+def run_session_zero_turn(db: DBSession, chat_history: list, player_input: str):
+    """
+    Processes a single turn of the Session Zero conversation.
+    Takes the full chat history and new player input, and returns the AI's response.
+    """
+    system_instruction = """
+You are a friendly and creative guide for Session Zero of a new text-based RPG.
+Your goal is to have a natural conversation with the player to collaboratively build the game world and their character.
+Do NOT ask a list of questions. Ask one open-ended question at a time, then ask clarifying follow-up questions based on the player's response.
+First, establish the world's genre, tone, and a brief description.
+Second, work with the player to create their character concept, name, and backstory.
+Third, help them define their character's mechanics. Suggest 3-5 starting skills based on their backstory. For attributes (strength, dexterity, intelligence, charisma, wisdom, constitution), suggest a balanced array like 14, 13, 12, 11, 10, 8 to be assigned, but allow the player to adjust them.
+Finally, once the player is happy with everything, summarize all the details and call the `finalize_character_and_world` tool to officially create the character and start the game.
+Be engaging, creative, and conversational.
 """
+    # We construct the full prompt from the history and new input
+    full_prompt = f"{system_instruction}\n\n--- Conversation History ---\n{''.join(chat_history)}\n\n--- Your Turn ---\nPlayer: {player_input}\nGuide:"
 
-    raw_player_state = call_chat_model(
-        messages=[
-            {"role": "system", "content": "You are building the player's character sheet for a serious RPG campaign. Stick to the format."},
-            {"role": "user", "content": player_prompt}
-        ],
-        model="gpt4o",
-        temperature=0.7,
-        max_tokens=600
-    )
-
-    try:
-        parsed = extract_json_block(raw_player_state)
-        player = PlayerState(
-            session_id=new_session.id,
-            name=parsed["name"],
-            race=parsed["race"],
-            character_class=parsed["character_class"],
-            backstory=parsed["backstory"],
-            attributes=parsed["attributes"],
-            skills=parsed["skills"],
-            inventory=parsed["inventory"],
-            limitations=parsed["limitations"]
-        )
-        db.add(player)
-        db.commit()
-        print(f"\n✅ Player created: {player.name}, the {player.race} {player.character_class}")
-    except Exception as e:
-        print("❌ Failed to parse player state:", e)
-        print("Raw output:", raw_player_state)
-
-    print("\n✅ Session and character setup complete. You may now begin your journey.")
+    response_text = call_gemini_with_tools(db, None, full_prompt)
+    
+    return response_text

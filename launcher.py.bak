@@ -1,47 +1,62 @@
 # launcher.py
 
 import streamlit as st
-from sqlalchemy.orm import Session as DBSession
+from sqlalchemy.orm import sessionmaker
 from db.engine import get_engine
 from db.schema import Session as SessionModel, PlayerState
-from session_zero import run_session_zero
+# Import the new, correct function name from session_zero
+from session_zero import run_conversational_session_zero
+# We will need the game_loop for when a session is loaded
 from game_loop import run_game_loop
-
-from sqlalchemy.orm import sessionmaker
 
 SessionFactory = sessionmaker(bind=get_engine())
 
 st.set_page_config(page_title="AI RPG GM", layout="centered")
 st.title("🎮 AI RPG Game Master")
 
-with SessionFactory() as db:
-    sessions = db.query(SessionModel).order_by(SessionModel.id).all()
-    session_map = {f"{s.id} - {s.genre} ({s.tone})": s.id for s in sessions}
+# Use Streamlit's session state to manage which screen is shown
+if "screen" not in st.session_state:
+    st.session_state.screen = "home"
+    st.session_state.session_id = None
 
-    st.subheader("Start or Continue a Game")
+def show_home_screen():
+    with SessionFactory() as db:
+        sessions = db.query(SessionModel).order_by(SessionModel.id).all()
+        session_map = {f"{s.id} - {s.genre} ({s.tone})": s.id for s in sessions}
 
-    selected = st.selectbox("Choose a session to continue:", ["— New Game —"] + list(session_map.keys()))
+        st.subheader("Start or Continue a Game")
 
-    if st.button("Continue"):
-        if selected == "— New Game —":
-            run_session_zero(db)
+        selected = st.selectbox("Choose a session to continue:", ["— New Game —"] + list(session_map.keys()))
+
+        if st.button("Continue"):
+            if selected == "— New Game —":
+                # Switch to the session zero screen
+                st.session_state.screen = "session_zero"
+                st.rerun() # Use the new function here
+            else:
+                # This part is not fully implemented yet, but it would load a game
+                st.session_state.session_id = session_map[selected]
+                st.warning("Loading existing games is not fully implemented in the UI yet.")
+                # st.session_state.screen = "game_loop" # This would be the next step
+                # st.rerun() # Use the new function here
+
+def show_session_zero():
+    st.subheader("🎲 New Game: Session Zero")
+    st.info("The following is a live, interactive conversation with the GM. The conversation will happen in the terminal you used to launch this app. Type 'exit' in the terminal to cancel.")
+
+    with SessionFactory() as db:
+        # Call the new, correct function
+        new_session_id = run_conversational_session_zero(db)
+        if new_session_id:
+            st.success(f"Session {new_session_id} created! You can now close this and load the session from the main menu.")
+            st.session_state.screen = "home"
         else:
-            session_id = session_map[selected]
-            run_game_loop(db, session_id)
+            st.error("Session Zero was cancelled.")
+            st.session_state.screen = "home"
 
-    st.divider()
 
-    if st.checkbox("🔍 View Player State"):
-        if selected != "— New Game —":
-            sid = session_map[selected]
-            player = db.query(PlayerState).filter_by(session_id=sid).first()
-            if player:
-                st.text(f"Name: {player.name} ({player.character_class})")
-                st.text(f"Race: {player.race}")
-                st.text_area("Backstory", player.backstory)
-                st.json({
-                    "Attributes": player.attributes,
-                    "Skills": player.skills,
-                    "Inventory": player.inventory,
-                    "Limitations": player.limitations
-                })
+# --- Main App Router ---
+if st.session_state.screen == "home":
+    show_home_screen()
+elif st.session_state.screen == "session_zero":
+    show_session_zero()

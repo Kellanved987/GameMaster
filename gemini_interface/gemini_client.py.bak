@@ -1,0 +1,70 @@
+# gemini_interface/gemini_client.py
+
+import os
+import google.generativeai as genai
+from world_tools import AVAILABLE_TOOLS
+
+# Configure the client once
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+class ToolExecutor:
+    """A class to execute tool calls requested by the Gemini model."""
+    def __init__(self, db_session, session_id):
+        self.db_session = db_session
+        self.session_id = session_id
+
+    def execute(self, tool_call):
+        """Executes a single tool call."""
+        func_name = tool_call.name
+        if func_name in AVAILABLE_TOOLS:
+            func = AVAILABLE_TOOLS[func_name]
+            args = dict(tool_call.args)
+
+            # Check if this tool needs the database context
+            # A simple heuristic: if it's not the memory filter, it needs the db.
+            if func_name != 'select_relevant_memories':
+                # Add the db session and session id to the arguments
+                args['db_session'] = self.db_session
+                args['session_id'] = self.session_id
+            
+            # Call the actual function with the prepared arguments
+            return func(**args)
+        return f"Error: Tool '{func_name}' not found."
+
+
+def call_gemini_with_tools(db_session, session_id, prompt: str):
+    """
+    Calls the Gemini model, then manually executes any requested tool calls.
+    """
+    # We now pass the raw, unwrapped functions to the model.
+    # The model can now correctly inspect them.
+    model = genai.GenerativeModel(
+        model_name='gemini-1.5-flash',
+        tools=list(AVAILABLE_TOOLS.values())
+    )
+
+    # We disable automatic function calling because we are now handling it manually.
+    chat = model.start_chat()
+    response = chat.send_message(prompt)
+
+    # Manually check for a tool call response
+    try:
+        tool_calls = response.candidates[0].content.parts[0].function_calls
+    except (IndexError, AttributeError):
+        # No tool call was made, just return the text
+        return response.text
+
+    # If we are here, the model wants to call one or more tools
+    executor = ToolExecutor(db_session, session_id)
+    tool_responses = []
+
+    for tool_call in tool_calls:
+        print(f"Executing tool call: {tool_call.name} with args: {dict(tool_call.args)}")
+        result = executor.execute(tool_call)
+        tool_responses.append(genai.Part(
+            function_response=genai.protos.FunctionResponse(name=tool_call.name, response={'result': result})
+        ))
+
+    # Send the results of the tool calls back to the model
+    second_response = chat.send_message(tool_responses)
+    return second_response.text

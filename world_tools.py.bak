@@ -1,13 +1,12 @@
 # world_tools.py
 
 from sqlalchemy.orm import Session as DBSession
-# Note: You may need to adjust these imports based on your exact schema file location
 from db.schema import Quest, NPC, WorldFlag, Rumor, PlayerState, JournalEntry, ConversationContext, SessionModel
 from datetime import datetime
 from google.generativeai.types import FunctionDeclaration, Tool
 
 # =====================================================================================
-# ORIGINAL FUNCTION DEFINITIONS
+# ORIGINAL FUNCTION DEFINITIONS (UNCHANGED)
 # =====================================================================================
 
 def update_quest_status(db_session: DBSession, session_id: int, quest_name: str, new_status: str, reason: str):
@@ -27,6 +26,7 @@ def update_quest_status(db_session: DBSession, session_id: int, quest_name: str,
 
 def update_npc_status(db_session: DBSession, session_id: int, npc_name: str, new_status: str, reason: str):
     """
+
     Updates the status of an NPC (e.g., 'friendly', 'hostile', 'deceased', 'busy').
     Use this to reflect changes in an NPC's state or disposition due to game events.
     """
@@ -172,7 +172,6 @@ def save_dialogue_context(db_session: DBSession, session_id: int, npc_name: str,
 
 def select_relevant_memories(memory_indices: list[int]):
     """
-
     Selects a list of relevant memory chunks based on their indices.
     The AI should call this function with a list of integers corresponding to the memories it deems most relevant.
     """
@@ -180,10 +179,10 @@ def select_relevant_memories(memory_indices: list[int]):
 
 
 # =====================================================================================
-# CORRECTED TOOL DEFINITIONS FOR THE AI MODEL
+# CORRECTED TOOL DEFINITIONS
 # =====================================================================================
-# This list contains the correctly formatted Tool objects that the Gemini model expects.
-# We pass this list to the model during its initialization.
+# We manually define the schema for each tool to hide the `db_session` and `session_id`
+# parameters from the AI, as those are handled by the backend.
 
 WORLD_TOOLS_LIST = [
     Tool(function_declarations=[FunctionDeclaration(
@@ -259,21 +258,6 @@ WORLD_TOOLS_LIST = [
     )])
 ]
 
-# =====================================================================================
-# FUNCTION HANDLER DICTIONARY FOR YOUR BACKEND
-# =====================================================================================
-# This dictionary maps the function names to the actual callable Python functions.
-# Your code will use this to EXECUTE a function call requested by the model.
 
-FUNCTION_HANDLERS = {
-    "update_quest_status": update_quest_status,
-    "update_npc_status": update_npc_status,
-    "create_rumor": create_rumor,
-    "set_world_flag": set_world_flag,
-    "update_player_character": update_player_character,
-    "create_journal_entry": create_journal_entry,
-    "update_npc_motivation": update_npc_motivation,
-    "finalize_character_and_world": finalize_character_and_world,
-    "save_dialogue_context": save_dialogue_context,
-    "select_relevant_memies": select_relevant_memories,
-}
+# The old AVAILABLE_TOOLS dictionary is no longer needed.
+# You should import WORLD_TOOLS_LIST in your main script and pass it to the model.
