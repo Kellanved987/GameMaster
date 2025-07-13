@@ -19,15 +19,12 @@ class Session(Base):
     id = Column(Integer, primary_key=True)
     genre = Column(String)
     tone = Column(String)
-    world_intro = Column(Text) # <-- This is the fix
+    world_intro = Column(Text)
     realism = Column(Boolean)
     power_fantasy = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     sim_counter = Column(Integer, default=0)
     player_state = relationship("PlayerState", back_populates="session", uselist=False)
-
-class NPC(Base):
-    # db/schema.py
 
 class NPC(Base):
     __tablename__ = "npcs"
@@ -37,7 +34,6 @@ class NPC(Base):
     role = Column(String)
     faction = Column(String)
     combat_style = Column(String, default='Unknown')
-    # --- THIS IS THE FIX ---
     # A more granular 1-100 scale for power level.
     # 1=Child, 15=Commoner, 50=Elite Knight, 75=Master Mage, 100=Demigod
     power_level = Column(Integer, default=15) 
@@ -127,7 +123,7 @@ class PlayerState(Base):
     character_class = Column(String)
     backstory = Column(Text)
     attributes = Column(JSON)     # {"strength": 10, "dexterity": 14, ...}
-    skills = Column(JSON)         # ["lockpicking", "tracking"]
+    skills = Column(JSON)         # {"lockpicking": "tracking"}
     inventory = Column(JSON)      # ["dagger", "rope"]
     limitations = Column(JSON)    # ["no magic", "hunted in Duskport"]
 

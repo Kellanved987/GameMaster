@@ -1,0 +1,82 @@
+# export_db.py
+
+import json
+from sqlalchemy.orm import sessionmaker
+from db.engine import get_engine
+from db.schema import PlayerState, NPC, Session, Turn
+
+# This utility connects to your database and exports the relevant data to a text file.
+
+def export_game_data(session_id: int):
+    """
+    Connects to the database and exports the data for a specific session ID.
+    """
+    SessionFactory = sessionmaker(bind=get_engine())
+    db = SessionFactory()
+
+    try:
+        # Fetch the session, player, NPCs, and turns
+        session = db.query(Session).get(session_id)
+        player = db.query(PlayerState).filter_by(session_id=session_id).first()
+        npcs = db.query(NPC).filter_by(session_id=session_id).all()
+        turns = db.query(Turn).filter_by(session_id=session_id).order_by(Turn.turn_number).all()
+
+        if not session:
+            print(f"No session found with ID: {session_id}")
+            return
+
+        # Prepare the data for JSON export
+        export_data = {
+            "session": {
+                "id": session.id,
+                "genre": session.genre,
+                "tone": session.tone,
+            },
+            "player_state": {
+                "name": player.name,
+                "class": player.character_class,
+                "attributes": player.attributes,
+                "skills": player.skills,
+                "inventory": player.inventory,
+                "limitations": player.limitations,
+                "backstory": player.backstory
+            } if player else None,
+            "npcs": [
+                {
+                    "name": npc.name,
+                    "role": npc.role,
+                    "status": npc.status,
+                    "power_level": npc.power_level,
+                    "combat_style": npc.combat_style,
+                    "motivation": npc.motivation
+                } for npc in npcs
+            ],
+            "turns": [
+                {
+                    "turn_number": turn.turn_number,
+                    "player_input": turn.player_input,
+                    "gm_response": turn.gm_response
+                } for turn in turns
+            ]
+        }
+
+        # --- THIS IS THE FIX ---
+        # Define the output filename
+        output_filename = f"campaign_export_{session_id}.txt"
+        
+        # Write the data to a text file
+        with open(output_filename, 'w') as f:
+            json.dump(export_data, f, indent=2)
+            
+        print(f"Successfully exported campaign data to {output_filename}")
+
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    # --- IMPORTANT ---
+    # Change the number below to the ID of the campaign you want to export.
+    # You can see the session IDs when you run the launcher.
+    # For example, if your campaign is "1 - Dark Fantasy (Gritty)", use 1.
+    campaign_session_id = 1 
+    export_game_data(campaign_session_id)

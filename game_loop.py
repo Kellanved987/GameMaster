@@ -1,7 +1,7 @@
 # game_loop.py
 
 import json
-import re # Import the regular expression module
+import re
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import desc
 from datetime import datetime
@@ -25,7 +25,6 @@ def run_game_turn(db: DBSession, session_id: int, player_input: str):
     turn_counter = db.query(Turn).filter_by(session_id=session_id).count() + 1
     
     # --- STEP 1: THE LOGIC ENGINE (Gemini 2.5 Pro) ---
-    # This AI acts as the rules referee. It decides the outcome but does not write the story.
     print("\n--- Running Logic Engine ---")
     logic_prompt_context = build_prompt(db, session_id, player_input)
     
@@ -41,40 +40,18 @@ Based on the provided game state and player input, determine the outcome of the 
     - `outcome_summary`: A brief, one-sentence description of what happened. (e.g., "The player successfully picks the lock.")
     - `tool_calls`: A list of any necessary tool call objects. Each object must have a `name` and `args`.
 
-**Example Response:**
-```json
-{{
-  "outcome_summary": "The player's necromantic spell fails, angering the forest spirits.",
-  "tool_calls": [
-    {{
-      "name": "set_world_flag",
-      "args": {{
-        "key": "forest_disposition",
-        "value": "hostile",
-        "reason": "The player's failed necromancy attempt angered the local spirits."
-      }}
-    }}
-  ]
-}}
-```
-
 **Game State:**
 {logic_prompt_context}
 """
     
-    # We use Gemini Pro for its superior reasoning and structured data handling.
     logic_response_text = call_gemini_with_tools(db, session_id, messages=[{"role": "user", "content": logic_prompt}])
     
     try:
-        # --- FIX: Made JSON parsing more robust ---
-        # Use a regular expression to find the JSON block, which is more reliable
-        # than just stripping characters.
         match = re.search(r"\{.*\}", logic_response_text, re.DOTALL)
         if match:
             clean_json_string = match.group(0)
             logic_result = json.loads(clean_json_string)
         else:
-            # If no JSON is found, raise an error to be caught below.
             raise json.JSONDecodeError("No JSON object found in the response.", logic_response_text, 0)
             
     except json.JSONDecodeError:
@@ -82,25 +59,27 @@ Based on the provided game state and player input, determine the outcome of the 
         logic_result = {"outcome_summary": "The world seems to shift in response to your action, but the details are unclear.", "tool_calls": []}
 
     # --- STEP 2: THE NARRATOR (GPT-4o) ---
-    # This AI's only job is to be the creative writer. It receives the simple outcome
-    # from the Logic Engine and turns it into an engaging story.
     print("\n--- Running Narrator ---")
     
-    # --- FIX: Safer prompt construction ---
-    # This avoids potential quote errors if the summary contains quotation marks.
     summary = logic_result.get('outcome_summary', 'Something unexpected happens.')
+    
+    # --- THIS IS THE FIX ---
+    # The narrator now receives the full game context in addition to the event summary.
     narration_prompt = f"""
 You are a master storyteller and cinematic AI Game Master.
 Your only job is to take the following event summary and turn it into an engaging, immersive, and well-written narrative of 2-3 paragraphs.
+You MUST use the provided Game State context to inform your narration. The story must be consistent with the recent dialogue, character sheets, and world state.
 Do not break character or mention game mechanics.
 
-Event Summary:
+**Event to Narrate:**
 {summary}
+
+**Full Game State Context:**
+{logic_prompt_context}
 """
     narration = call_chat_model([{"role": "user", "content": narration_prompt}], model="gpt4o")
 
     # --- STEP 3: EXECUTE TOOL CALLS & LOGGING ---
-    # Now that narration is done, execute the tool calls identified by the Logic Engine.
     print("\n--- Executing World Reactions ---")
     if logic_result.get("tool_calls"):
         for tool_call in logic_result["tool_calls"]:
@@ -109,11 +88,8 @@ Event Summary:
             
             if func_name in FUNCTION_HANDLERS:
                 func_to_call = FUNCTION_HANDLERS[func_name]
-                # Add necessary context to the arguments
                 args['db_session'] = db
                 args['session_id'] = session_id
-                # Ensure all required args are present, providing defaults if not
-                # This is a basic way to handle potential missing args from the LLM
                 if func_name == 'create_journal_entry' and 'turn_number' not in args:
                     args['turn_number'] = turn_counter
 
@@ -133,7 +109,7 @@ Event Summary:
         turn_number=turn_counter,
         player_input=player_input,
         gm_response=narration,
-        prompt_snapshot=logic_prompt_context, # Log the context given to the logic engine
+        prompt_snapshot=logic_prompt_context,
         timestamp=datetime.utcnow()
     )
     db.add(turn_entry)

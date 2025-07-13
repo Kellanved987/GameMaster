@@ -6,7 +6,7 @@ from datetime import datetime
 from google.generativeai.types import FunctionDeclaration, Tool
 
 # =====================================================================================
-# ORIGINAL FUNCTION DEFINITIONS
+# FUNCTION DEFINITIONS
 # =====================================================================================
 
 def update_quest_status(db_session: DBSession, session_id: int, quest_name: str, new_status: str, reason: str):
@@ -210,7 +210,7 @@ def select_relevant_memories(memory_indices: list[int]):
     return memory_indices
 
 # =====================================================================================
-# CORRECTED TOOL DEFINITIONS FOR THE AI MODEL
+# TOOL DEFINITIONS & HANDLERS
 # =====================================================================================
 WORLD_TOOLS_LIST = [
     Tool(function_declarations=[FunctionDeclaration(
@@ -300,9 +300,6 @@ WORLD_TOOLS_LIST = [
     )])
 ]
 
-# =====================================================================================
-# FUNCTION HANDLER DICTIONARY FOR YOUR BACKEND
-# =====================================================================================
 FUNCTION_HANDLERS = {
     "update_quest_status": update_quest_status,
     "update_npc_status": update_npc_status,
@@ -316,4 +313,4 @@ FUNCTION_HANDLERS = {
     "finalize_character_and_world": finalize_character_and_world,
     "save_dialogue_context": save_dialogue_context,
     "select_relevant_memories": select_relevant_memories,
-}a
+}
