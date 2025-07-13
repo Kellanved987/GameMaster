@@ -1,40 +1,9 @@
+# session_zero.py
 
 from sqlalchemy.orm import Session as DBSession
 from gemini_interface.gemini_client import call_gemini_with_tools
-from world_tools import (
-    finalize_character_and_world,
-    FUNCTION_HANDLERS,
-    Tool,
-    FunctionDeclaration,
-)
-
-# Define the minimal toolset for session zero
-FINALIZE_TOOL = [
-    Tool(
-        function_declarations=[
-            FunctionDeclaration(
-                name="finalize_character_and_world",
-                description=FUNCTION_HANDLERS["finalize_character_and_world"].__doc__,
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "genre": {"type": "string"},
-                        "tone": {"type": "string"},
-                        "world_intro": {"type": "string"},
-                        "player_name": {"type": "string"},
-                        "backstory": {"type": "string"},
-                        "attributes": {"type": "object"},
-                        "skills": {"type": "object"},
-                    },
-                    "required": [
-                        "genre", "tone", "world_intro", "player_name",
-                        "backstory", "attributes", "skills"
-                    ],
-                },
-            )
-        ]
-    )
-]
+# This now correctly imports the main tool list from its proper source.
+from world_tools import WORLD_TOOLS_LIST
 
 def run_session_zero_turn(db: DBSession, messages: list):
     """
@@ -50,9 +19,7 @@ Your goal is to have a natural conversation with the player to collaboratively b
 1.  **World First:** Establish the world's genre, tone, and a brief description.
 2.  **Character Concept:** Work with the player on their character's name and backstory.
 3.  **Mechanics - Skills:**
-    - The game uses a 1-100 skill system with six mastery tiers (Novice, Apprentice, Adept, Expert, Master, Grandmaster).
-    - Based on the character's backstory, suggest 3-5 starting skills.
-    - Assign a starting value between 5 and 15 to each of these skills. Higher values should be for skills more central to their backstory.
+    - The game uses a 1-100 skill system. Based on the backstory, suggest 3-5 starting skills with values between 5 and 15.
 4.  **Mechanics - Attributes:**
     - For attributes (strength, dexterity, intelligence, charisma, wisdom, constitution), suggest a balanced array like 14, 13, 12, 11, 10, 8 to be assigned, but let the player adjust them.
 5.  **Finalize:** Once the player is happy, summarize everything and call the `finalize_character_and_world` tool.
@@ -64,9 +31,9 @@ Ask one open-ended question at a time. Be engaging and conversational.
     # Combine system instruction with the message history
     full_history = [system_instruction] + messages
 
+    # The call now correctly uses the imported WORLD_TOOLS_LIST
     response_text = call_gemini_with_tools(
-        db, None, messages=full_history, tools=FINALIZE_TOOL
+        db, None, messages=full_history, tools=WORLD_TOOLS_LIST
     )
 
-    # This now correctly returns only the string, as it did originally.
     return response_text
