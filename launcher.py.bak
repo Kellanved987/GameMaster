@@ -3,7 +3,7 @@
 import streamlit as st
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import desc
-import traceback
+import traceback # Import the traceback module
 
 from db.engine import get_engine
 # Import all schema models needed for deletion/restarting
@@ -110,8 +110,21 @@ def show_home_screen():
                             session = db.query(SessionModel).get(session_id)
                             player = db.query(PlayerState).filter_by(session_id=session_id).first()
                             intro_prompt = f"""
-                            You are a master storyteller...
-                            """ # Abridged for brevity
+                            You are a master storyteller and Game Master.
+                            Your task is to write a compelling, cinematic opening scene for a new RPG campaign.
+                            This is the very first thing the player will see.
+
+                            Campaign Details:
+                            - Genre: {session.genre}
+                            - Tone: {session.tone}
+
+                            Player Character Backstory:
+                            "{player.backstory}"
+
+                            Based on these details, write an engaging opening narration of 2-3 paragraphs.
+                            Set the scene, establish the mood, and end with a prompt that draws the player into the world, asking them "What do you do?".
+                            Do not give the player any choices, just describe their current situation.
+                            """
                             opening_scene = call_gemini_with_tools(db, session_id, messages=[{"role": "user", "content": intro_prompt}])
                             st.session_state.messages.append({"role": "assistant", "content": opening_scene})
                     else:
@@ -209,7 +222,7 @@ def show_game_screen():
         st.rerun()
 
 # --- Main App Router ---
-# --- THIS IS THE FIX: Wrap the main router in a try...except block ---
+# --- THIS IS THE FIX: Added console printing to the error handler ---
 try:
     if st.session_state.screen == "home":
         show_home_screen()
@@ -218,8 +231,11 @@ try:
     elif st.session_state.screen == "game":
         show_game_screen()
 except Exception as e:
-    # If any error occurs in any of the screens, display it permanently
-    st.error("An unexpected error occurred!")
+    # Print the full traceback to the console
+    print("--- AN ERROR OCCURRED ---")
+    print(traceback.format_exc())
+    print("-------------------------")
+    
+    # Also display the error in the Streamlit UI
+    st.error("An unexpected error occurred! Check the console for details.")
     st.exception(e)
-    # We don't call st.stop() here because st.exception already halts execution in a way
-    # that keeps the error visible on the screen until the next user interaction.

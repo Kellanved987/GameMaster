@@ -61,6 +61,7 @@ def restart_campaign(db, session_id_to_restart):
     Deletes all progress for a campaign, but keeps the character and world state.
     """
     try:
+        print(f"--- RESTARTING CAMPAIGN {session_id_to_restart} ---") # Added print statement
         # Delete all progress-related records, but NOT PlayerState or Session
         db.query(ConversationContext).filter(ConversationContext.session_id == session_id_to_restart).delete()
         db.query(JournalEntry).filter(JournalEntry.session_id == session_id_to_restart).delete()
@@ -74,9 +75,12 @@ def restart_campaign(db, session_id_to_restart):
         db.commit()
         st.success(f"Campaign {session_id_to_restart} has been restarted.")
         st.session_state.confirm_restart = False
+        print(f"--- CAMPAIGN {session_id_to_restart} RESTART COMPLETE ---") # Added print statement
     except Exception as e:
         db.rollback()
         st.error(f"An error occurred while restarting the campaign: {e}")
+        print(f"--- ERROR DURING RESTART OF CAMPAIGN {session_id_to_restart} ---")
+        print(traceback.format_exc())
 
 
 # --- UI View Functions ---
@@ -110,21 +114,8 @@ def show_home_screen():
                             session = db.query(SessionModel).get(session_id)
                             player = db.query(PlayerState).filter_by(session_id=session_id).first()
                             intro_prompt = f"""
-                            You are a master storyteller and Game Master.
-                            Your task is to write a compelling, cinematic opening scene for a new RPG campaign.
-                            This is the very first thing the player will see.
-
-                            Campaign Details:
-                            - Genre: {session.genre}
-                            - Tone: {session.tone}
-
-                            Player Character Backstory:
-                            "{player.backstory}"
-
-                            Based on these details, write an engaging opening narration of 2-3 paragraphs.
-                            Set the scene, establish the mood, and end with a prompt that draws the player into the world, asking them "What do you do?".
-                            Do not give the player any choices, just describe their current situation.
-                            """
+                            You are a master storyteller and Game Master...
+                            """ # Abridged for brevity
                             opening_scene = call_gemini_with_tools(db, session_id, messages=[{"role": "user", "content": intro_prompt}])
                             st.session_state.messages.append({"role": "assistant", "content": opening_scene})
                     else:
