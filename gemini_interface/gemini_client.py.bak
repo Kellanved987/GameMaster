@@ -11,15 +11,24 @@ load_dotenv()
 # Configure the client once at the module level
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
+# Define safety settings to allow for mature content like violence in a fantasy game
+SAFETY_SETTINGS = {
+    "HARM_CATEGORY_HARASSMENT": "BLOCK_NONE",
+    "HARM_CATEGORY_HATE_SPEECH": "BLOCK_NONE",
+    "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_NONE",
+    "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_NONE",
+}
+
 def get_model(model_name='gemini-2.5-pro', tools=WORLD_TOOLS_LIST, system_instruction=None):
     """Initializes and returns a Gemini model with a specific toolset and system instruction."""
     return genai.GenerativeModel(
         model_name=model_name,
         tools=tools,
-        system_instruction=system_instruction
+        system_instruction=system_instruction,
+        safety_settings=SAFETY_SETTINGS
     )
 
-def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-2.5-pro', tools=WORLD_TOOLS_LIST):
+def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-2.5-pro', tools=WORLD_TOOLS_LIST, return_after_tools=False):
     """
     Calls the Gemini model with a set of tools and a message history, then manually
     executes any function calls the model requests in a loop.
@@ -50,12 +59,12 @@ def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-
         
     response = chat.send_message(gemini_history[-1]['parts'][0]['text'])
 
-    # --- THIS IS THE FIX: Added a max_iterations counter to the loop ---
-    max_iterations = 10  # Set a reasonable limit to prevent infinite loops
+    max_iterations = 10
     iteration_count = 0
     
     while iteration_count < max_iterations:
-        # Check for tool calls
+        iteration_count += 1
+        
         tool_calls = []
         if (response.candidates and 
             len(response.candidates) > 0 and 
@@ -66,13 +75,10 @@ def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-
                 if hasattr(part, 'function_call') and part.function_call:
                     tool_calls.append(part.function_call)
 
-        # If there are no tool calls, exit the loop
         if not tool_calls:
             break
-
-        iteration_count += 1
+            
         api_responses = []
-
         for tool_call in tool_calls:
             func_name = tool_call.name
             print(f"Model wants to call tool: {func_name} with args: {dict(tool_call.args)}")
@@ -88,7 +94,10 @@ def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-
                 
                 result = func_to_call(**args)
                 
-                if func_name == 'finalize_character_and_world':
+                # --- THIS IS THE FIX ---
+                # Added 'select_relevant_memories' to the list of tools that should
+                # immediately return their result instead of continuing the loop.
+                if func_name in ['finalize_character_and_world', 'select_relevant_memories']:
                     return result
                 
                 api_responses.append({
@@ -105,18 +114,19 @@ def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-
                     }
                 })
         
+        if return_after_tools:
+            return "Tools executed successfully."
+
         if api_responses:
             response = chat.send_message(api_responses)
         else:
             break
             
-    # --- THIS IS THE FIX: Check if the loop was terminated by the stopper ---
     if iteration_count >= max_iterations:
         error_message = f"ERROR: Loop stopper triggered after {max_iterations} iterations. The last attempted tool call was likely part of a loop. Please check the console logs for details."
         print(error_message)
         return error_message
 
-    # If the loop finished normally, return the AI's final text response.
     try:
         return response.text
     except ValueError as e:

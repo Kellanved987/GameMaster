@@ -61,7 +61,7 @@ Analyze the player's performance and use the tool if progression is warranted. I
 
     print("\n--- Evaluating Player Progression ---")
     # --- THIS IS THE FIX ---
-    # We explicitly tell the client to use the faster, cheaper Flash model.
-    final_response = call_gemini_with_tools(db, session_id, [{"role": "user", "content": prompt}], model_name='gemini-1.5-flash-latest')
+    # By removing the model_name argument, this call will now default to Gemini 1.5 Pro.
+    final_response = call_gemini_with_tools(db, session_id, [{"role": "user", "content": prompt}])
     print(f"Progression result: {final_response}")
     print("--- Progression Evaluation Complete ---")

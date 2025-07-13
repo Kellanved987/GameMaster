@@ -79,6 +79,8 @@ def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-
             break
             
         api_responses = []
+        tool_results = [] # <-- New list to store the results of tool calls
+
         for tool_call in tool_calls:
             func_name = tool_call.name
             print(f"Model wants to call tool: {func_name} with args: {dict(tool_call.args)}")
@@ -94,11 +96,11 @@ def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-
                 
                 result = func_to_call(**args)
                 
-                # --- THIS IS THE FIX ---
-                # Added 'select_relevant_memories' to the list of tools that should
-                # immediately return their result instead of continuing the loop.
-                if func_name in ['finalize_character_and_world', 'select_relevant_memories']:
+                # The finalize tool is unique and should always exit immediately.
+                if func_name == 'finalize_character_and_world':
                     return result
+                
+                tool_results.append(result) # <-- Store the result of the tool call
                 
                 api_responses.append({
                     "function_response": {
@@ -114,8 +116,11 @@ def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-
                     }
                 })
         
+        # --- THIS IS THE FIX ---
+        # If the flag is set, stop the conversation and return the results of the tools.
         if return_after_tools:
-            return "Tools executed successfully."
+            # If only one tool was called, return its result directly. Otherwise, return the list.
+            return tool_results[0] if len(tool_results) == 1 else tool_results
 
         if api_responses:
             response = chat.send_message(api_responses)

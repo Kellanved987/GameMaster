@@ -2,11 +2,10 @@
 
 from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import desc
+from gpt_interface.gpt_client import call_chat_model
 from gemini_interface.gemini_client import call_gemini_with_tools
-# Import all necessary schema objects
 from db.schema import NPC, Turn, ConversationContext
 
-# We'll simulate the top 5 most relevant NPCs to keep the simulation focused
 NPC_SIMULATION_LIMIT = 5
 
 def run_simulation_pass(db: DBSession, session_id: int):
@@ -16,7 +15,6 @@ def run_simulation_pass(db: DBSession, session_id: int):
     """
     print("\n--- Running Per-NPC Simulation Pass ---")
 
-    # Get the context of recent events
     recent_turns = db.query(Turn).filter_by(session_id=session_id)\
         .order_by(desc(Turn.turn_number)).limit(5).all()
     context_text = "\n".join(
@@ -24,7 +22,6 @@ def run_simulation_pass(db: DBSession, session_id: int):
         for t in reversed(recent_turns)
     )
 
-    # --- REFINED NPC SELECTION ---
     key_npcs = (
         db.query(NPC)
         .join(ConversationContext, NPC.id == ConversationContext.npc_id)
@@ -49,35 +46,38 @@ def run_simulation_pass(db: DBSession, session_id: int):
     for npc in key_npcs:
         print(f"\n  > Simulating for: {npc.name} (Motivation: {npc.motivation})")
 
-        # --- FIX: Made the prompt instructions even more explicit to prevent errors ---
         prompt = f"""
 You are simulating the off-screen actions for a single NPC in an RPG.
+
+**Game World Key:**
+- Power Level Scale: 1 (Child) to 100 (God-like Entity).
 
 **NPC Profile:**
 - Name: {npc.name}
 - Role: {npc.role}
-- Current Status: {npc.status}
-- Core Motivation: "{npc.motivation}"
+- Status: {npc.status}
+- Motivation: "{npc.motivation}"
+- Power Level: {npc.power_level}
 
 **Recent Game Events:**
 {context_text}
 
-**Your Task:**
-Based on the NPC's profile and recent events, decide if they have taken any significant action in the background.
-
-1.  **Analyze:** Has the player's actions or the unfolding story caused this NPC to act on their motivation?
-2.  **Act:** If the NPC has done something significant, call ONE of the following tools with a clear `reason`:
-    * `update_npc_status(npc_name, new_status, reason)`
-    * `update_quest_status(quest_name, new_status, reason)`
-    * `create_rumor(rumor_content, is_confirmed)`
-    * `set_world_flag(key, value, reason)`
-    * `update_npc_motivation(npc_name, new_motivation, reason)`
-3.  **Idle:** If the NPC has not done anything noteworthy, you MUST respond with the exact phrase: "No significant actions taken."
-
-Do not invent new tools. Only use the tools provided.
+Based on the NPC's profile and the recent events, what is a single, significant action they have taken in the background? A higher power level NPC should be capable of more impactful actions. Describe it in one sentence. For example: "The guard captain (Power: 55) has doubled the patrols near the old warehouse." If they have not done anything noteworthy, just say "No significant action."
 """
-        # This call will use the AI to decide if this specific NPC should do anything
-        npc_action_response = call_gemini_with_tools(db, session_id, prompt, model_name='gemini-1.5-flash-latest')
-        print(f"    Result for {npc.name}: {npc_action_response}")
+        print("\n--- Simulating NPC Actions (GPT-4o) ---")
+        npc_action_description = call_chat_model([{"role": "user", "content": prompt}], model="gpt4o")
+
+        if "no significant action" not in npc_action_description.lower():
+            tool_prompt = f"""
+            An NPC has taken a background action. Based on the description below, call the most appropriate tool to update the game state.
+
+            Action Description: "{npc_action_description}"
+            
+            Available Tools: `update_npc_status`, `update_quest_status`, `create_rumor`, `set_world_flag`.
+            """
+            npc_action_response = call_gemini_with_tools(db, session_id, tool_prompt, model_name='gemini-2.5-flash', return_after_tools=True)
+            print(f"    Result for {npc.name}: {npc_action_response}")
+        else:
+            print(f"    Result for {npc.name}: No significant actions taken.")
 
     print("\n--- Simulation Pass Complete ---")

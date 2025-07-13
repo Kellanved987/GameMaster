@@ -64,7 +64,6 @@ def set_world_flag(db_session: DBSession, session_id: int, key: str, value: str,
     db_session.commit()
     return f"Success: World flag '{key}' set to '{value}' because: {reason}."
 
-# --- FIX: Made skill_updates, new_inventory_items, and new_limitations optional ---
 def update_player_character(db_session: DBSession, session_id: int, skill_updates: dict = None, new_inventory_items: list = None, new_limitations: list = None):
     """
     Updates the player's skills, adds items to their inventory, or adds new limitations.
@@ -75,8 +74,6 @@ def update_player_character(db_session: DBSession, session_id: int, skill_update
     if not player:
         return "Error: Player state not found."
 
-    # Use mutable_json_type from sqlalchemy.dialects.postgresql import JSONB
-    # from sqlalchemy.ext.mutable import MutableDict
     if skill_updates:
         current_skills = player.skills or {}
         current_skills.update(skill_updates)
@@ -95,7 +92,6 @@ def update_player_character(db_session: DBSession, session_id: int, skill_update
     db_session.commit()
     return f"Success: Player state updated. Skills: {skill_updates}, Items: {new_inventory_items}, Limitations: {new_limitations}"
 
-
 def create_journal_entry(db_session: DBSession, session_id: int, turn_number: int, summary_text: str):
     """
     Creates a new narrative journal entry to summarize recent events.
@@ -111,7 +107,6 @@ def create_journal_entry(db_session: DBSession, session_id: int, turn_number: in
     db_session.commit()
     return f"Success: Journal entry created for turn {turn_number}."
 
-
 def update_npc_motivation(db_session: DBSession, session_id: int, npc_name: str, new_motivation: str, reason: str):
     """
     Updates the core motivation of an NPC.
@@ -122,6 +117,30 @@ def update_npc_motivation(db_session: DBSession, session_id: int, npc_name: str,
         npc.motivation = new_motivation
         db_session.commit()
         return f"Success: NPC '{npc_name}' motivation changed to '{new_motivation}' because: {reason}"
+    return f"Error: NPC '{npc_name}' not found."
+
+def update_npc_power_level(db_session: DBSession, session_id: int, npc_name: str, new_power_level: int, reason: str):
+    """
+    Updates the power level of an NPC on a scale of 1-100.
+    Use this when an NPC becomes significantly stronger or weaker.
+    """
+    npc = db_session.query(NPC).filter_by(session_id=session_id, name=npc_name).first()
+    if npc:
+        npc.power_level = new_power_level
+        db_session.commit()
+        return f"Success: NPC '{npc_name}' power level changed to '{new_power_level}' because: {reason}"
+    return f"Error: NPC '{npc_name}' not found."
+
+def update_npc_combat_style(db_session: DBSession, session_id: int, npc_name: str, new_combat_style: str, reason: str):
+    """
+    Updates the combat style of an NPC (e.g., 'Brute', 'Skirmisher', 'Mage').
+    Use this when an NPC's combat behavior is revealed or changes.
+    """
+    npc = db_session.query(NPC).filter_by(session_id=session_id, name=npc_name).first()
+    if npc:
+        npc.combat_style = new_combat_style
+        db_session.commit()
+        return f"Success: NPC '{npc_name}' combat style changed to '{new_combat_style}' because: {reason}"
     return f"Error: NPC '{npc_name}' not found."
 
 def finalize_character_and_world(db_session: DBSession, genre: str, tone: str, world_intro: str, player_name: str, backstory: str, attributes: dict, skills: dict):
@@ -162,10 +181,9 @@ def save_dialogue_context(db_session: DBSession, session_id: int, npc_name: str,
     """
     npc = db_session.query(NPC).filter_by(session_id=session_id, name=npc_name).first()
     if not npc:
-        npc = NPC(session_id=session_id, name=npc_name, role="Unknown", motivation="Unknown", status="active")
+        npc = NPC(session_id=session_id, name=npc_name, role="Unknown", motivation="Unknown", status="active", power_level=15, combat_style="Unknown")
         db_session.add(npc)
         db_session.commit()
-
 
     context = db_session.query(ConversationContext).filter_by(session_id=session_id, npc_id=npc.id).first()
     if context:
@@ -186,19 +204,14 @@ def save_dialogue_context(db_session: DBSession, session_id: int, npc_name: str,
 
 def select_relevant_memories(memory_indices: list[int]):
     """
-
     Selects a list of relevant memory chunks based on their indices.
     The AI should call this function with a list of integers corresponding to the memories it deems most relevant.
     """
     return memory_indices
 
-
 # =====================================================================================
 # CORRECTED TOOL DEFINITIONS FOR THE AI MODEL
 # =====================================================================================
-# This list contains the correctly formatted Tool objects that the Gemini model expects.
-# We pass this list to the model during its initialization.
-
 WORLD_TOOLS_LIST = [
     Tool(function_declarations=[FunctionDeclaration(
         name='update_quest_status',
@@ -250,6 +263,20 @@ WORLD_TOOLS_LIST = [
         },'required':['npc_name','new_motivation','reason']}
     )]),
     Tool(function_declarations=[FunctionDeclaration(
+        name='update_npc_power_level',
+        description=update_npc_power_level.__doc__,
+        parameters={'type':'object','properties':{
+            'npc_name':{'type':'string'},'new_power_level':{'type':'integer'},'reason':{'type':'string'}
+        },'required':['npc_name','new_power_level','reason']}
+    )]),
+    Tool(function_declarations=[FunctionDeclaration(
+        name='update_npc_combat_style',
+        description=update_npc_combat_style.__doc__,
+        parameters={'type':'object','properties':{
+            'npc_name':{'type':'string'},'new_combat_style':{'type':'string'},'reason':{'type':'string'}
+        },'required':['npc_name','new_combat_style','reason']}
+    )]),
+    Tool(function_declarations=[FunctionDeclaration(
         name='finalize_character_and_world',
         description=finalize_character_and_world.__doc__,
         parameters={'type':'object','properties':{
@@ -276,9 +303,6 @@ WORLD_TOOLS_LIST = [
 # =====================================================================================
 # FUNCTION HANDLER DICTIONARY FOR YOUR BACKEND
 # =====================================================================================
-# This dictionary maps the function names to the actual callable Python functions.
-# Your code will use this to EXECUTE a function call requested by the model.
-
 FUNCTION_HANDLERS = {
     "update_quest_status": update_quest_status,
     "update_npc_status": update_npc_status,
@@ -287,7 +311,9 @@ FUNCTION_HANDLERS = {
     "update_player_character": update_player_character,
     "create_journal_entry": create_journal_entry,
     "update_npc_motivation": update_npc_motivation,
+    "update_npc_power_level": update_npc_power_level,
+    "update_npc_combat_style": update_npc_combat_style,
     "finalize_character_and_world": finalize_character_and_world,
     "save_dialogue_context": save_dialogue_context,
     "select_relevant_memories": select_relevant_memories,
-}
+}a

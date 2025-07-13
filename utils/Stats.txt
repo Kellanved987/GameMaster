@@ -1,0 +1,1 @@
+Str:8 Dex:12 Con: 12 Int:16 Wis: 8 Cha: 14

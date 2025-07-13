@@ -27,12 +27,20 @@ class Session(Base):
     player_state = relationship("PlayerState", back_populates="session", uselist=False)
 
 class NPC(Base):
+    # db/schema.py
+
+class NPC(Base):
     __tablename__ = "npcs"
     id = Column(Integer, primary_key=True)
     session_id = Column(Integer, ForeignKey("sessions.id"))
     name = Column(String)
     role = Column(String)
     faction = Column(String)
+    combat_style = Column(String, default='Unknown')
+    # --- THIS IS THE FIX ---
+    # A more granular 1-100 scale for power level.
+    # 1=Child, 15=Commoner, 50=Elite Knight, 75=Master Mage, 100=Demigod
+    power_level = Column(Integer, default=15) 
     motivation = Column(Text)
     status = Column(String)
     personality_traits = Column(Text)

@@ -19,6 +19,7 @@ class Session(Base):
     id = Column(Integer, primary_key=True)
     genre = Column(String)
     tone = Column(String)
+    world_intro = Column(Text) # <-- This is the fix
     realism = Column(Boolean)
     power_fantasy = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -98,7 +99,6 @@ class Turn(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     prompt_snapshot = Column(Text)  # Stores full prompt sent to GPT
     
-# ... (after the Turn class)
 
 class JournalEntry(Base):
     __tablename__ = "journal_entries"
@@ -108,7 +108,6 @@ class JournalEntry(Base):
     entry_text = Column(Text) # The narrative summary
     timestamp = Column(DateTime, default=datetime.utcnow)
 
-# ... (rest of the file)
 
 class PlayerState(Base):
     __tablename__ = "player_state"

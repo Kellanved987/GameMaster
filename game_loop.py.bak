@@ -11,8 +11,6 @@ from gemini_interface.gemini_client import call_gemini_with_tools
 from gpt_interface.gpt_client import call_chat_model
 from db.schema import Turn
 from memory.ingest import chunk_and_store
-# --- FIX: We no longer need this dedicated dialogue tracker ---
-# from utils.dialogue_tracker import update_conversation_context
 from utils.simulation import run_simulation_pass
 from utils.progression import evaluate_player_growth
 
@@ -27,10 +25,19 @@ def run_game_turn(db: DBSession, session_id: int, player_input: str):
     print("\n--- Processing Turn ---")
     full_prompt = build_prompt(db, session_id, player_input)
     
+    # --- THIS IS THE FIX ---
+    # The system prompt now explicitly instructs the AI to act as a rules referee.
     messages = [
         {
             "role": "system",
-            "content": "You are a cinematic, immersive AI game master. Narrate the outcome of the player's action based on the detailed context provided. Do not break character."
+            "content": """
+You are a cinematic, immersive, and strict AI Game Master. Your primary role is to act as a rules referee and storyteller.
+
+1.  **Analyze Feasibility:** First, look at the [Player Input] and compare it to the [Player Character Sheet]. Is the requested action possible?
+    - If the action is impossible (e.g., trying to cast a complex spell with no magic skill, or lifting a massive boulder with low strength), your response must be to deny the action. Explain *why* it's not possible based on their character sheet. For example: "You reach for magical energies, but find only a void; your lack of training in the arcane arts makes casting such a spell impossible."
+    - If the action is possible but very difficult, narrate the struggle and the likely failure or partial success.
+2.  **Narrate the Outcome:** Based on your feasibility analysis, narrate the outcome of the player's action in a cinematic, immersive style, consistent with the game's tone. Do not break character.
+"""
         },
         {"role": "user", "content": full_prompt}
     ]
@@ -50,26 +57,28 @@ def run_game_turn(db: DBSession, session_id: int, player_input: str):
 
     # --- MEMORY & CONTEXT ---
     chunk_and_store(f"Player: {player_input}\nGM: {narration}", session_id)
-    # --- FIX: Removed the call to update_conversation_context ---
     
     # --- IMMEDIATE WORLD REACTION ---
     print("\n--- Checking for Immediate World Reactions ---")
     
-    # --- FIX: This is now the single source of truth for all post-turn tool calls ---
     reaction_prompt = f"""
-    The player just took an action ("{player_input}") and the GM narrated the result ("{narration}").
-    
-    Your task is to analyze this turn and call ANY necessary tools to update the game state.
-    
-    1.  **Dialogue:** If there was a conversation, use `save_dialogue_context`.
-    2.  **Quests:** If a quest was updated, use `update_quest_status`.
-    3.  **NPCs:** If an NPC's status changed, use `update_npc_status`.
-    4.  **World:** If a world flag was set, use `set_world_flag`.
-    5.  **Rumors:** If a new rumor started, use `create_rumor`.
-    
-    You can call multiple tools if necessary. If no tools are needed, respond with "No immediate world state changes."
+    You are a game state manager. Your ONLY job is to call tools based on the last turn.
+
+    **Last Turn:**
+    - Player Input: "{player_input}"
+    - GM Response: "{narration}"
+
+    **Available Tools:**
+    - `save_dialogue_context(npc_name: str, topic: str, dialogue_summary: str)`
+    - `update_quest_status(quest_name: str, new_status: str, reason: str)`
+    - `update_npc_status(npc_name: str, new_status: str, reason: str)`
+    - `create_rumor(rumor_content: str, is_confirmed: bool)`
+    - `set_world_flag(key: str, value: str, reason: str)`
+
+    Analyze the last turn and call any necessary tools. If no tools are needed, respond with "No changes."
+    Do not add any other text to your response.
     """
-    call_gemini_with_tools(db, session_id, messages=reaction_prompt)
+    call_gemini_with_tools(db, session_id, messages=reaction_prompt, return_after_tools=True)
     print("--- World Reaction Check Complete ---")
 
     # --- PERIODIC SIMULATION & PROGRESSION ---
