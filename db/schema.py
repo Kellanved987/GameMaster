@@ -79,6 +79,7 @@ class Location(Base):
     atmosphere = Column(String)
     local_events = Column(SQLiteJSON)
     connected_locations = Column(SQLiteJSON)
+    session_id = Column(Integer, ForeignKey("sessions.id")) 
 
 
 class ConversationContext(Base):

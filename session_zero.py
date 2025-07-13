@@ -1,4 +1,3 @@
-# session_zero.py
 
 from sqlalchemy.orm import Session as DBSession
 from gemini_interface.gemini_client import call_gemini_with_tools
@@ -25,7 +24,7 @@ FINALIZE_TOOL = [
                         "player_name": {"type": "string"},
                         "backstory": {"type": "string"},
                         "attributes": {"type": "object"},
-                        "skills": {"type": "object"}, # --- CHANGED to object for skill levels
+                        "skills": {"type": "object"},
                     },
                     "required": [
                         "genre", "tone", "world_intro", "player_name",
@@ -41,7 +40,6 @@ def run_session_zero_turn(db: DBSession, messages: list):
     """
     Processes a single turn of the Session Zero conversation using a stateful history.
     """
-    # --- NEW: Updated system instruction with tiered progression rules ---
     system_instruction = {
         "role": "system",
         "content": """
@@ -70,4 +68,5 @@ Ask one open-ended question at a time. Be engaging and conversational.
         db, None, messages=full_history, tools=FINALIZE_TOOL
     )
 
+    # This now correctly returns only the string, as it did originally.
     return response_text

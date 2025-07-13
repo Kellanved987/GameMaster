@@ -1,15 +1,15 @@
-# launcher.py
+# kellanved987/gamemaster/GameMaster-a3a27eca3400b56292c31c1c7bf611a13a230a19/launcher.py
 
 import streamlit as st
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import desc
-import traceback # Import the traceback module
+import traceback
+import time
 
 from db.engine import get_engine
-# Import all schema models needed for deletion/restarting
 from db.schema import Session as SessionModel, Turn, PlayerState, NPC, Quest, WorldFlag, Rumor, Location, ConversationContext, JournalEntry
 from session_zero import run_session_zero_turn
-from game_loop import run_game_turn 
+from game_loop import run_game_turn
 from gemini_interface.gemini_client import call_gemini_with_tools
 from dotenv import load_dotenv
 
@@ -30,11 +30,7 @@ if "screen" not in st.session_state:
 
 # --- Deletion and Restart Logic ---
 def delete_campaign(db, session_id_to_delete):
-    """
-    Deletes all data associated with a specific session_id from the database.
-    """
     try:
-        # Delete all dependent records first
         db.query(ConversationContext).filter(ConversationContext.session_id == session_id_to_delete).delete()
         db.query(JournalEntry).filter(JournalEntry.session_id == session_id_to_delete).delete()
         db.query(Location).filter(Location.session_id == session_id_to_delete).delete()
@@ -44,11 +40,9 @@ def delete_campaign(db, session_id_to_delete):
         db.query(Rumor).filter(Rumor.session_id == session_id_to_delete).delete()
         db.query(Turn).filter(Turn.session_id == session_id_to_delete).delete()
         db.query(WorldFlag).filter(WorldFlag.session_id == session_id_to_delete).delete()
-        
         session_to_delete = db.query(SessionModel).get(session_id_to_delete)
         if session_to_delete:
             db.delete(session_to_delete)
-        
         db.commit()
         st.success(f"Campaign {session_id_to_delete} has been permanently deleted.")
         st.session_state.confirm_delete = False
@@ -57,12 +51,8 @@ def delete_campaign(db, session_id_to_delete):
         st.error(f"An error occurred while deleting the campaign: {e}")
 
 def restart_campaign(db, session_id_to_restart):
-    """
-    Deletes all progress for a campaign, but keeps the character and world state.
-    """
     try:
-        print(f"--- RESTARTING CAMPAIGN {session_id_to_restart} ---") # Added print statement
-        # Delete all progress-related records, but NOT PlayerState or Session
+        print(f"--- RESTARTING CAMPAIGN {session_id_to_restart} ---")
         db.query(ConversationContext).filter(ConversationContext.session_id == session_id_to_restart).delete()
         db.query(JournalEntry).filter(JournalEntry.session_id == session_id_to_restart).delete()
         db.query(Location).filter(Location.session_id == session_id_to_restart).delete()
@@ -71,17 +61,15 @@ def restart_campaign(db, session_id_to_restart):
         db.query(Rumor).filter(Rumor.session_id == session_id_to_restart).delete()
         db.query(Turn).filter(Turn.session_id == session_id_to_restart).delete()
         db.query(WorldFlag).filter(WorldFlag.session_id == session_id_to_restart).delete()
-        
         db.commit()
         st.success(f"Campaign {session_id_to_restart} has been restarted.")
         st.session_state.confirm_restart = False
-        print(f"--- CAMPAIGN {session_id_to_restart} RESTART COMPLETE ---") # Added print statement
+        print(f"--- CAMPAIGN {session_id_to_restart} RESTART COMPLETE ---")
     except Exception as e:
         db.rollback()
         st.error(f"An error occurred while restarting the campaign: {e}")
         print(f"--- ERROR DURING RESTART OF CAMPAIGN {session_id_to_restart} ---")
         print(traceback.format_exc())
-
 
 # --- UI View Functions ---
 
@@ -106,16 +94,12 @@ def show_home_screen():
                     st.session_state.session_id = session_id
                     st.session_state.screen = "game"
                     st.session_state.messages = []
-
                     turn_count = db.query(Turn).filter_by(session_id=session_id).count()
-
                     if turn_count == 0:
                         with st.spinner("The stage is being set..."):
                             session = db.query(SessionModel).get(session_id)
                             player = db.query(PlayerState).filter_by(session_id=session_id).first()
-                            intro_prompt = f"""
-                            You are a master storyteller and Game Master...
-                            """ # Abridged for brevity
+                            intro_prompt = "You are a master storyteller..."
                             opening_scene = call_gemini_with_tools(db, session_id, messages=[{"role": "user", "content": intro_prompt}])
                             st.session_state.messages.append({"role": "assistant", "content": opening_scene})
                     else:
@@ -153,7 +137,7 @@ def show_home_screen():
                     st.rerun()
         
         if st.session_state.get('confirm_restart', False):
-            st.warning(f"Are you sure you want to restart campaign {st.session_state.session_to_restart}? All progress will be lost.")
+            st.warning(f"Are you sure you want to restart campaign {st.session_state.session_to_restart}?")
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("Yes, Restart It", use_container_width=True, type="primary"):
@@ -185,11 +169,28 @@ def show_session_zero_ui():
         
         st.session_state.messages.append({"role": "assistant", "content": response})
 
-        if "Success: World and character" in response:
-            st.success("Your new adventure is ready! Go back to the main menu to load it.")
-            st.session_state.screen = "home"
-            if st.button("Back to Main Menu"):
+        if "Success: World and character created for session" in response:
+            st.success("Your new adventure is ready! Loading game...")
+            try:
+                # --- THIS IS THE FIX ---
+                # Parse the session ID from the response string.
+                new_session_id = int(response.split("session ")[1].split(".")[0])
+                
+                # Set session state to switch to the game screen.
+                st.session_state.session_id = new_session_id
+                st.session_state.screen = "game"
+                st.session_state.messages = [] 
+                
+                # A short delay to allow the user to read the message.
+                time.sleep(2)
                 st.rerun()
+
+            except (IndexError, ValueError) as e:
+                # Fallback if parsing fails, restoring the original button.
+                st.error("Error starting game automatically. Please return to the main menu to load your game.")
+                st.session_state.screen = "home"
+                if st.button("Back to Main Menu"):
+                    st.rerun()
 
 def show_game_screen():
     st.subheader("⚔️ Adventure in Progress")
@@ -213,7 +214,6 @@ def show_game_screen():
         st.rerun()
 
 # --- Main App Router ---
-# --- THIS IS THE FIX: Added console printing to the error handler ---
 try:
     if st.session_state.screen == "home":
         show_home_screen()
@@ -222,11 +222,8 @@ try:
     elif st.session_state.screen == "game":
         show_game_screen()
 except Exception as e:
-    # Print the full traceback to the console
     print("--- AN ERROR OCCURRED ---")
     print(traceback.format_exc())
     print("-------------------------")
-    
-    # Also display the error in the Streamlit UI
     st.error("An unexpected error occurred! Check the console for details.")
     st.exception(e)

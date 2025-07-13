@@ -1,8 +1,8 @@
+# kellanved987/gamemaster/GameMaster-a3a27eca3400b56292c31c1c7bf611a13a230a19/session_zero.py
 # session_zero.py
 
 from sqlalchemy.orm import Session as DBSession
 from gemini_interface.gemini_client import call_gemini_with_tools
-# --- CHANGE 1: Import the specific tool and handler we need ---
 from world_tools import (
     finalize_character_and_world,
     FUNCTION_HANDLERS,
@@ -10,7 +10,7 @@ from world_tools import (
     FunctionDeclaration,
 )
 
-# --- CHANGE 2: Define the minimal toolset for session zero ---
+# Define the minimal toolset for session zero
 FINALIZE_TOOL = [
     Tool(
         function_declarations=[
@@ -26,7 +26,7 @@ FINALIZE_TOOL = [
                         "player_name": {"type": "string"},
                         "backstory": {"type": "string"},
                         "attributes": {"type": "object"},
-                        "skills": {"type": "array", "items": {"type": "string"}},
+                        "skills": {"type": "object"}, # --- CHANGED to object for skill levels
                     },
                     "required": [
                         "genre", "tone", "world_intro", "player_name",
@@ -38,31 +38,51 @@ FINALIZE_TOOL = [
     )
 ]
 
-# --- CHANGE 3: Update the function to accept a message list ---
 def run_session_zero_turn(db: DBSession, messages: list):
     """
     Processes a single turn of the Session Zero conversation using a stateful history.
+    Returns a tuple of (response_text, new_session_id).
+    new_session_id is None unless the finalization step is successful.
     """
+    # --- NEW: Updated system instruction with tiered progression rules ---
     system_instruction = {
         "role": "system",
         "content": """
 You are a friendly and creative guide for Session Zero of a new text-based RPG.
 Your goal is to have a natural conversation with the player to collaboratively build the game world and their character.
-Do NOT ask a list of questions. Ask one open-ended question at a time, then ask clarifying follow-up questions based on the player's response.
-First, establish the world's genre, tone, and a brief description.
-Second, work with the player to create their character concept, name, and backstory.
-Third, help them define their character's mechanics. Suggest 3-5 starting skills based on their backstory. For attributes (strength, dexterity, intelligence, charisma, wisdom, constitution), suggest a balanced array like 14, 13, 12, 11, 10, 8 to be assigned, but allow the player to adjust them.
-Finally, once the player is happy with everything, summarize all the details and call the `finalize_character_and_world` tool to officially create the character and start the game.
-Be engaging, creative, and conversational.
+
+**Character Creation Rules:**
+1.  **World First:** Establish the world's genre, tone, and a brief description.
+2.  **Character Concept:** Work with the player on their character's name and backstory.
+3.  **Mechanics - Skills:**
+    - The game uses a 1-100 skill system with six mastery tiers (Novice, Apprentice, Adept, Expert, Master, Grandmaster).
+    - Based on the character's backstory, suggest 3-5 starting skills.
+    - Assign a starting value between 5 and 15 to each of these skills. Higher values should be for skills more central to their backstory.
+4.  **Mechanics - Attributes:**
+    - For attributes (strength, dexterity, intelligence, charisma, wisdom, constitution), suggest a balanced array like 14, 13, 12, 11, 10, 8 to be assigned, but let the player adjust them.
+5.  **Finalize:** Once the player is happy, summarize everything and call the `finalize_character_and_world` tool.
+
+Ask one open-ended question at a time. Be engaging and conversational.
 """
     }
 
     # Combine system instruction with the message history
     full_history = [system_instruction] + messages
 
-    # --- CHANGE 4: Call the Gemini client with the history and minimal tool ---
     response_text = call_gemini_with_tools(
         db, None, messages=full_history, tools=FINALIZE_TOOL
     )
 
-    return response_text
+    # Check if the response indicates success and extract the ID
+    if "Success: World and character created for session" in response_text:
+        try:
+            # Example: "Success: World and character created for session 1.\n\n"
+            session_id_str = response_text.split("session ")[1].split(".")[0]
+            new_session_id = int(session_id_str)
+            return response_text, new_session_id
+        except (IndexError, ValueError):
+            # Parsing failed, proceed as normal
+            return response_text, None
+    else:
+        # Not the finalization step, no ID to return
+        return response_text, None

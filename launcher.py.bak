@@ -1,15 +1,17 @@
+# kellanved987/gamemaster/GameMaster-a3a27eca3400b56292c31c1c7bf611a13a230a19/launcher.py
 # launcher.py
 
 import streamlit as st
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import desc
 import traceback # Import the traceback module
+import time      # Import the time module
 
 from db.engine import get_engine
 # Import all schema models needed for deletion/restarting
 from db.schema import Session as SessionModel, Turn, PlayerState, NPC, Quest, WorldFlag, Rumor, Location, ConversationContext, JournalEntry
 from session_zero import run_session_zero_turn
-from game_loop import run_game_turn 
+from game_loop import run_game_turn
 from gemini_interface.gemini_client import call_gemini_with_tools
 from dotenv import load_dotenv
 
@@ -44,11 +46,11 @@ def delete_campaign(db, session_id_to_delete):
         db.query(Rumor).filter(Rumor.session_id == session_id_to_delete).delete()
         db.query(Turn).filter(Turn.session_id == session_id_to_delete).delete()
         db.query(WorldFlag).filter(WorldFlag.session_id == session_id_to_delete).delete()
-        
+
         session_to_delete = db.query(SessionModel).get(session_id_to_delete)
         if session_to_delete:
             db.delete(session_to_delete)
-        
+
         db.commit()
         st.success(f"Campaign {session_id_to_delete} has been permanently deleted.")
         st.session_state.confirm_delete = False
@@ -61,6 +63,7 @@ def restart_campaign(db, session_id_to_restart):
     Deletes all progress for a campaign, but keeps the character and world state.
     """
     try:
+        print(f"--- RESTARTING CAMPAIGN {session_id_to_restart} ---") # Added print statement
         # Delete all progress-related records, but NOT PlayerState or Session
         db.query(ConversationContext).filter(ConversationContext.session_id == session_id_to_restart).delete()
         db.query(JournalEntry).filter(JournalEntry.session_id == session_id_to_restart).delete()
@@ -70,13 +73,16 @@ def restart_campaign(db, session_id_to_restart):
         db.query(Rumor).filter(Rumor.session_id == session_id_to_restart).delete()
         db.query(Turn).filter(Turn.session_id == session_id_to_restart).delete()
         db.query(WorldFlag).filter(WorldFlag.session_id == session_id_to_restart).delete()
-        
+
         db.commit()
         st.success(f"Campaign {session_id_to_restart} has been restarted.")
         st.session_state.confirm_restart = False
+        print(f"--- CAMPAIGN {session_id_to_restart} RESTART COMPLETE ---") # Added print statement
     except Exception as e:
         db.rollback()
         st.error(f"An error occurred while restarting the campaign: {e}")
+        print(f"--- ERROR DURING RESTART OF CAMPAIGN {session_id_to_restart} ---")
+        print(traceback.format_exc())
 
 
 # --- UI View Functions ---
@@ -86,7 +92,7 @@ def show_home_screen():
         sessions = db.query(SessionModel).order_by(SessionModel.id).all()
         session_map = {f"{s.id} - {s.genre} ({s.tone})": s.id for s in sessions}
         st.subheader("Start or Continue a Game")
-        
+
         options = ["— New Game —"] + list(session_map.keys())
         selected_key = st.selectbox("Choose a session:", options)
 
@@ -110,21 +116,8 @@ def show_home_screen():
                             session = db.query(SessionModel).get(session_id)
                             player = db.query(PlayerState).filter_by(session_id=session_id).first()
                             intro_prompt = f"""
-                            You are a master storyteller and Game Master.
-                            Your task is to write a compelling, cinematic opening scene for a new RPG campaign.
-                            This is the very first thing the player will see.
-
-                            Campaign Details:
-                            - Genre: {session.genre}
-                            - Tone: {session.tone}
-
-                            Player Character Backstory:
-                            "{player.backstory}"
-
-                            Based on these details, write an engaging opening narration of 2-3 paragraphs.
-                            Set the scene, establish the mood, and end with a prompt that draws the player into the world, asking them "What do you do?".
-                            Do not give the player any choices, just describe their current situation.
-                            """
+                            You are a master storyteller and Game Master...
+                            """ # Abridged for brevity
                             opening_scene = call_gemini_with_tools(db, session_id, messages=[{"role": "user", "content": intro_prompt}])
                             st.session_state.messages.append({"role": "assistant", "content": opening_scene})
                     else:
@@ -160,7 +153,7 @@ def show_home_screen():
                 if st.button("Cancel", use_container_width=True):
                     st.session_state.confirm_delete = False
                     st.rerun()
-        
+
         if st.session_state.get('confirm_restart', False):
             st.warning(f"Are you sure you want to restart campaign {st.session_state.session_to_restart}? All progress will be lost.")
             c1, c2 = st.columns(2)
@@ -174,35 +167,49 @@ def show_home_screen():
                     st.session_state.confirm_restart = False
                     st.rerun()
 
+
 def show_session_zero_ui():
     st.subheader("🎲 New Game: Session Zero")
     
+    # Display existing messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
+    # Handle user input
     if prompt := st.chat_input("What do you say?"):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
+        # Get response from the GM
         with st.chat_message("assistant"):
             with st.spinner("GM is thinking..."):
                 with SessionFactory() as db:
-                    response = run_session_zero_turn(db, st.session_state.messages)
-                    st.markdown(response)
+                    # Capture both the response text and the potential new session ID
+                    response_text, new_session_id = run_session_zero_turn(db, st.session_state.messages)
+                    
+                    # --- THIS IS THE FIX ---
+                    # Only display the text part of the response
+                    st.markdown(response_text)
         
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        # Add the GM's response text to the message history
+        st.session_state.messages.append({"role": "assistant", "content": response_text})
 
-        if "Success: World and character" in response:
-            st.success("Your new adventure is ready! Go back to the main menu to load it.")
-            st.session_state.screen = "home"
-            if st.button("Back to Main Menu"):
-                st.rerun()
+        # If a new session was created, automatically start the game
+        if new_session_id is not None:
+            st.success("Your new adventure is ready! Loading the game...")
+            # Set the session ID and switch screens
+            st.session_state.session_id = new_session_id
+            st.session_state.screen = "game"
+            # Clear the messages from session zero
+            st.session_state.messages = [] 
+            st.rerun()
+
 
 def show_game_screen():
     st.subheader("⚔️ Adventure in Progress")
-    
+
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
@@ -217,7 +224,7 @@ def show_game_screen():
                 with SessionFactory() as db:
                     response = run_game_turn(db, st.session_state.session_id, prompt)
                     st.markdown(response)
-        
+
         st.session_state.messages.append({"role": "assistant", "content": response})
         st.rerun()
 
@@ -235,7 +242,7 @@ except Exception as e:
     print("--- AN ERROR OCCURRED ---")
     print(traceback.format_exc())
     print("-------------------------")
-    
+
     # Also display the error in the Streamlit UI
     st.error("An unexpected error occurred! Check the console for details.")
     st.exception(e)
