@@ -11,15 +11,24 @@ load_dotenv()
 # Configure the client once at the module level
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
+# Define safety settings to allow for mature content like violence in a fantasy game
+SAFETY_SETTINGS = {
+    "HARM_CATEGORY_HARASSMENT": "BLOCK_NONE",
+    "HARM_CATEGORY_HATE_SPEECH": "BLOCK_NONE",
+    "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_NONE",
+    "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_NONE",
+}
+
 def get_model(model_name='gemini-2.5-pro', tools=WORLD_TOOLS_LIST, system_instruction=None):
     """Initializes and returns a Gemini model with a specific toolset and system instruction."""
     return genai.GenerativeModel(
         model_name=model_name,
         tools=tools,
-        system_instruction=system_instruction
+        system_instruction=system_instruction,
+        safety_settings=SAFETY_SETTINGS
     )
 
-def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-2.5-pro', tools=WORLD_TOOLS_LIST):
+def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-2.5-pro', tools=WORLD_TOOLS_LIST, return_after_tools=False):
     """
     Calls the Gemini model with a set of tools and a message history, then manually
     executes any function calls the model requests in a loop.
@@ -54,6 +63,8 @@ def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-
     iteration_count = 0
     
     while iteration_count < max_iterations:
+        iteration_count += 1
+        
         tool_calls = []
         if (response.candidates and 
             len(response.candidates) > 0 and 
@@ -66,10 +77,8 @@ def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-
 
         if not tool_calls:
             break
-
-        iteration_count += 1
+            
         api_responses = []
-
         for tool_call in tool_calls:
             func_name = tool_call.name
             print(f"Model wants to call tool: {func_name} with args: {dict(tool_call.args)}")
@@ -105,6 +114,9 @@ def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-
                     }
                 })
         
+        if return_after_tools:
+            return "Tools executed successfully."
+
         if api_responses:
             response = chat.send_message(api_responses)
         else:

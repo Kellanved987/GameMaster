@@ -45,7 +45,7 @@ def show_home_screen():
                 st.session_state.screen = "game"
                 st.session_state.messages = []
 
-                # --- NEW: Logic to handle first-time load ---
+                # --- Logic to handle first-time load ---
                 turn_count = db.query(Turn).filter_by(session_id=session_id).count()
 
                 if turn_count == 0:
@@ -103,8 +103,8 @@ def show_session_zero_ui():
 
         if "Success: World and character" in response:
             st.success("Your new adventure is ready! Go back to the main menu to load it.")
+            st.session_state.screen = "home"
             if st.button("Back to Main Menu"):
-                st.session_state.screen = "home"
                 st.rerun()
 
 def show_game_screen():

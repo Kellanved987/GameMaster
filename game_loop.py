@@ -8,11 +8,10 @@ from datetime import datetime
 # Adjusted imports
 from prompt_builder.builder import build_prompt
 from gemini_interface.gemini_client import call_gemini_with_tools
-from gpt_interface.gpt_client import call_chat_model
+# --- FIX: We no longer need the gpt_client ---
+# from gpt_interface.gpt_client import call_chat_model
 from db.schema import Turn
 from memory.ingest import chunk_and_store
-# We no longer need the dedicated dialogue tracker
-# from utils.dialogue_tracker import update_conversation_context
 from utils.simulation import run_simulation_pass
 from utils.progression import evaluate_player_growth
 
@@ -27,14 +26,13 @@ def run_game_turn(db: DBSession, session_id: int, player_input: str):
     print("\n--- Processing Turn ---")
     full_prompt = build_prompt(db, session_id, player_input)
     
+    # --- FIX: Using Gemini 2.5 Pro for the main, creative narration ---
     messages = [
-        {
-            "role": "system",
-            "content": "You are a cinematic, immersive AI game master. Narrate the outcome of the player's action based on the detailed context provided. Do not break character."
-        },
+        {"role": "system", "content": "You are a cinematic, immersive AI game master. Narrate the outcome of the player's action based on the detailed context provided. Do not break character."},
         {"role": "user", "content": full_prompt}
     ]
-    narration = call_chat_model(messages, model="gpt4o")
+    # This now uses our updated Gemini client, which will default to the Pro model
+    narration = call_gemini_with_tools(db, session_id, messages=messages)
 
     # --- DATABASE LOGGING ---
     turn_entry = Turn(
@@ -54,9 +52,8 @@ def run_game_turn(db: DBSession, session_id: int, player_input: str):
     # --- IMMEDIATE WORLD REACTION ---
     print("\n--- Checking for Immediate World Reactions ---")
     
-    # --- FIX: Made the prompt extremely specific with function signatures ---
     reaction_prompt = f"""
-    You are a game state manager. Based on the last turn, decide if any of the following tools need to be called.
+    You are a game state manager. Your ONLY job is to call tools based on the last turn.
 
     **Last Turn:**
     - Player Input: "{player_input}"
@@ -69,9 +66,10 @@ def run_game_turn(db: DBSession, session_id: int, player_input: str):
     - `create_rumor(rumor_content: str, is_confirmed: bool)`
     - `set_world_flag(key: str, value: str, reason: str)`
 
-    Based on the turn, call any of the tools that are necessary. If none are needed, respond with "No immediate world state changes."
+    Analyze the last turn and call any necessary tools. If no tools are needed, respond with "No changes."
+    Do not add any other text to your response.
     """
-    call_gemini_with_tools(db, session_id, messages=reaction_prompt)
+    call_gemini_with_tools(db, session_id, messages=reaction_prompt, return_after_tools=True)
     print("--- World Reaction Check Complete ---")
 
     # --- PERIODIC SIMULATION & PROGRESSION ---
