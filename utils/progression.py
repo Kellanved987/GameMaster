@@ -9,7 +9,7 @@ from sqlalchemy import desc
 def evaluate_player_growth(db: DBSession, session_id: int, recent_turns: int = 5):
     """
     Evaluates the player's recent actions and calls the update_player_character tool
-    to apply any deserved progression based on a tiered skill system.
+    to apply any deserved progression.
     """
     player = db.query(PlayerState).filter_by(session_id=session_id).first()
     if not player:
@@ -27,7 +27,6 @@ def evaluate_player_growth(db: DBSession, session_id: int, recent_turns: int = 5
         f"Player: {t.player_input}\nGM: {t.gm_response}" for t in turns
     )
 
-    # --- NEW: Updated system prompt with tiered progression rules ---
     prompt = f"""
 You are managing player progression in a long-term RPG campaign that uses a 1-100 skill-based system, similar to the Elder Scrolls.
 
@@ -61,6 +60,8 @@ Analyze the player's performance and use the tool if progression is warranted. I
 """
 
     print("\n--- Evaluating Player Progression ---")
+    # --- THIS IS THE FIX ---
+    # By removing the model_name argument, this call will now default to Gemini 1.5 Pro.
     final_response = call_gemini_with_tools(db, session_id, [{"role": "user", "content": prompt}])
     print(f"Progression result: {final_response}")
     print("--- Progression Evaluation Complete ---")

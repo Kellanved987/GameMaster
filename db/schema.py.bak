@@ -96,6 +96,19 @@ class Turn(Base):
     prompt_used = Column(Text)
     summary = Column(Text)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    prompt_snapshot = Column(Text)  # Stores full prompt sent to GPT
+    
+# ... (after the Turn class)
+
+class JournalEntry(Base):
+    __tablename__ = "journal_entries"
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("sessions.id"))
+    turn_number = Column(Integer) # The turn number at which this summary was created
+    entry_text = Column(Text) # The narrative summary
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+# ... (rest of the file)
 
 class PlayerState(Base):
     __tablename__ = "player_state"

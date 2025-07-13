@@ -18,5 +18,5 @@ Player input:
 GM response:
 {gm_response}
 """
-    # The Gemini client will handle the tool call and database update automatically.
-    call_gemini_with_tools(db, session_id, prompt)
+    # --- MODIFIED: Use the new, cheaper Flash model ---
+    call_gemini_with_tools(db, session_id, messages=prompt, model_name='gemini-2.5-flash')

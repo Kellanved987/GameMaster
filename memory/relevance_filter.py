@@ -27,16 +27,24 @@ Current player input: "{user_input.strip()}"
 Prior memory:
 {numbered_list}
 """
-    # Note: Because this tool doesn't use the database, we can pass `None` for the db_session and session_id.
-    # The client needs a slight modification to handle this gracefully.
-    selected_indices = call_gemini_with_tools(None, None, prompt)
+    # We use the cheaper Flash model for this high-frequency background task.
+    # The `select_relevant_memories` tool does not require database access.
+    response = call_gemini_with_tools(None, None, prompt, model_name='gemini-2.5-flash')
 
-    # The AI will return a list of integers directly.
-    # We add a check to ensure the response is what we expect.
-    if isinstance(selected_indices, list):
-        # We subtract 1 from the AI's 1-based numbering
-        return [chunks[i - 1] for i in selected_indices if 0 < i <= len(chunks)]
+    # --- THIS IS THE FIX ---
+    # The response from the tool call is the list itself. We need to ensure it's a list
+    # and that all its elements are integers before returning.
+    if isinstance(response, list):
+        try:
+            # Convert all numbers in the list to integers, just in case they are floats.
+            selected_indices = [int(i) for i in response]
+            # We subtract 1 from the AI's 1-based numbering
+            return [chunks[i - 1] for i in selected_indices if 0 < i <= len(chunks)]
+        except (ValueError, TypeError):
+            # Handle cases where the list contains non-numeric data
+            print("Warning: Relevance filter returned a list with invalid data.")
+            return chunks[:top_n]
 
-    # Fallback if the tool call fails for some reason
+    # Fallback if the tool call fails or returns an unexpected format
     print("Warning: Relevance filter did not return a list. Falling back to top N.")
     return chunks[:top_n]

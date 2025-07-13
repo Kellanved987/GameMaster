@@ -1,7 +1,6 @@
 # world_tools.py
 
 from sqlalchemy.orm import Session as DBSession
-# Note: You may need to adjust these imports based on your exact schema file location
 from db.schema import Quest, NPC, WorldFlag, Rumor, PlayerState, JournalEntry, ConversationContext, Session as SessionModel
 from datetime import datetime
 from google.generativeai.types import FunctionDeclaration, Tool
@@ -65,7 +64,8 @@ def set_world_flag(db_session: DBSession, session_id: int, key: str, value: str,
     db_session.commit()
     return f"Success: World flag '{key}' set to '{value}' because: {reason}."
 
-def update_player_character(db_session: DBSession, session_id: int, skill_updates: dict, new_inventory_items: list, new_limitations: list):
+# --- FIX: Made skill_updates, new_inventory_items, and new_limitations optional ---
+def update_player_character(db_session: DBSession, session_id: int, skill_updates: dict = None, new_inventory_items: list = None, new_limitations: list = None):
     """
     Updates the player's skills, adds items to their inventory, or adds new limitations.
     Use this to reflect player growth or changes resulting from their actions.
@@ -75,9 +75,9 @@ def update_player_character(db_session: DBSession, session_id: int, skill_update
     if not player:
         return "Error: Player state not found."
 
+    # Use mutable_json_type from sqlalchemy.dialects.postgresql import JSONB
+    # from sqlalchemy.ext.mutable import MutableDict
     if skill_updates:
-        # This is a mutable JSON field, so we need to mark it as modified.
-        # A simple way is to re-assign it.
         current_skills = player.skills or {}
         current_skills.update(skill_updates)
         player.skills = current_skills
@@ -92,8 +92,9 @@ def update_player_character(db_session: DBSession, session_id: int, skill_update
         current_limitations.extend(l for l in new_limitations if l not in current_limitations)
         player.limitations = current_limitations
 
-    db.commit()
+    db_session.commit()
     return f"Success: Player state updated. Skills: {skill_updates}, Items: {new_inventory_items}, Limitations: {new_limitations}"
+
 
 def create_journal_entry(db_session: DBSession, session_id: int, turn_number: int, summary_text: str):
     """
@@ -129,11 +130,10 @@ def finalize_character_and_world(db_session: DBSession, genre: str, tone: str, w
     This is the final step. Call this only when the player has confirmed all details are correct.
     """
     try:
-        new_session = SessionModel(genre=genre, tone=tone, realism=False, power_fantasy=False)
+        new_session = SessionModel(genre=genre, tone=tone, world_intro=world_intro, realism=False, power_fantasy=False)
         db_session.add(new_session)
         db_session.commit()
 
-        # --- FIX: Convert the special API objects into standard Python dictionaries ---
         final_attributes = dict(attributes)
         final_skills = dict(skills)
 
@@ -143,8 +143,8 @@ def finalize_character_and_world(db_session: DBSession, genre: str, tone: str, w
             race="Not specified",
             character_class="Not specified",
             backstory=backstory,
-            attributes=final_attributes, # Use the converted dictionary
-            skills=final_skills,       # Use the converted dictionary
+            attributes=final_attributes,
+            skills=final_skills,
             inventory=["Traveler's clothes", "Backpack", "Rations (3 days)"],
             limitations=[]
         )
@@ -162,7 +162,6 @@ def save_dialogue_context(db_session: DBSession, session_id: int, npc_name: str,
     """
     npc = db_session.query(NPC).filter_by(session_id=session_id, name=npc_name).first()
     if not npc:
-        # Let's create the NPC if it doesn't exist. This can happen in early turns.
         npc = NPC(session_id=session_id, name=npc_name, role="Unknown", motivation="Unknown", status="active")
         db_session.add(npc)
         db_session.commit()
@@ -187,6 +186,7 @@ def save_dialogue_context(db_session: DBSession, session_id: int, npc_name: str,
 
 def select_relevant_memories(memory_indices: list[int]):
     """
+
     Selects a list of relevant memory chunks based on their indices.
     The AI should call this function with a list of integers corresponding to the memories it deems most relevant.
     """
@@ -254,7 +254,7 @@ WORLD_TOOLS_LIST = [
         description=finalize_character_and_world.__doc__,
         parameters={'type':'object','properties':{
             'genre':{'type':'string'},'tone':{'type':'string'},'world_intro':{'type':'string'},'player_name':{'type':'string'},
-            'backstory':{'type':'string'},'attributes':{'type':'object'},'skills':{'type':'array','items':{'type':'string'}}
+            'backstory':{'type':'string'},'attributes':{'type':'object'},'skills':{'type':'object'}
         },'required':['genre','tone','world_intro','player_name','backstory','attributes','skills']}
     )]),
     Tool(function_declarations=[FunctionDeclaration(

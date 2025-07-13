@@ -1,82 +1,129 @@
-# game_loop.py
+# gemini_interface/gemini_client.py
 
-import json
-from sqlalchemy.orm import Session as DBSession
-from sqlalchemy import desc
-from datetime import datetime
+import os
+import google.generativeai as genai
+from dotenv import load_dotenv
+from world_tools import WORLD_TOOLS_LIST, FUNCTION_HANDLERS
 
-# Adjusted imports to be more modular
-from prompt_builder.builder import build_prompt
-from gemini_interface.gemini_client import call_gemini_with_tools
-from db.schema import Turn
-from memory.ingest import chunk_and_store
-from utils.dialogue_tracker import update_conversation_context
-from utils.simulation import run_simulation_pass
-from utils.progression import evaluate_player_growth
-from gpt_interface.gpt_client import call_chat_model # Retaining for low-stakes turns
+# Load environment variables from .env file
+load_dotenv()
 
-SIMULATION_TURN_THRESHOLD = 5
+# Configure the client once at the module level
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-def run_game_turn(db: DBSession, session_id: int, player_input: str):
-    """
-    Runs a single turn of the game, processes player input, and returns the GM response.
-    """
-    # Get the current turn number
-    turn_counter = db.query(Turn).filter_by(session_id=session_id).count() + 1
-    
-    # --- Dynamic Prompt Sizing Logic (from original game_loop) ---
-    is_low_stakes = len(player_input.split()) < 5
-
-    if is_low_stakes:
-        print("\n--- Low-Stakes Turn Detected ---")
-        narration = call_chat_model(
-            messages=[
-                {"role": "system", "content": "You are a game master. Briefly narrate the outcome of the player's simple action."},
-                {"role": "user", "content": f"Player action: {player_input}"}
-            ],
-            model="gpt35"
-        )
-        full_prompt = f"Low-stakes action: {player_input}" # For logging
-    else:
-        print("\n--- High-Stakes Turn Detected ---")
-        full_prompt = build_prompt(db, session_id, player_input)
-        
-        # In a web UI, we expect just the narration back. 
-        # The decision to run a simulation can be handled separately.
-        # We can simplify this call to use the gemini_client which is our main one.
-        narration = call_gemini_with_tools(db, session_id, messages=[{"role": "user", "content": full_prompt}])
-
-    # --- DATABASE LOGGING ---
-    turn_entry = Turn(
-        session_id=session_id,
-        turn_number=turn_counter,
-        player_input=player_input,
-        gm_response=narration,
-        prompt_snapshot=full_prompt,
-        timestamp=datetime.utcnow()
+def get_model(model_name='gemini-2.5-pro', tools=WORLD_TOOLS_LIST, system_instruction=None):
+    """Initializes and returns a Gemini model with a specific toolset and system instruction."""
+    return genai.GenerativeModel(
+        model_name=model_name,
+        tools=tools,
+        system_instruction=system_instruction
     )
-    db.add(turn_entry)
-    db.commit()
 
-    # --- MEMORY & CONTEXT ---
-    chunk_and_store(f"Player: {player_input}\nGM: {narration}", session_id)
-    update_conversation_context(db, session_id, player_input, narration)
+def call_gemini_with_tools(db_session, session_id, messages, model_name='gemini-2.5-pro', tools=WORLD_TOOLS_LIST):
+    """
+    Calls the Gemini model with a set of tools and a message history, then manually
+    executes any function calls the model requests in a loop.
+    """
+    # 1. SETUP
+    if isinstance(messages, str):
+        messages = [{"role": "user", "content": messages}]
+    elif not isinstance(messages, list):
+        raise ValueError(f"messages must be a list or string, got {type(messages)}")
     
-    # --- IMMEDIATE WORLD REACTION ---
-    if not is_low_stakes:
-        print("\n--- Checking for Immediate World Reactions ---")
-        reaction_prompt = f"""
-        The player just took an action and the GM narrated the result.
-        Player Input: "{player_input}"
-        GM Response: "{narration}"
-        Based *only* on this immediate turn, should any world state change? If so, use a tool.
-        """
-        call_gemini_with_tools(db, session_id, messages=[{"role": "user", "content": reaction_prompt}])
-        print("--- World Reaction Check Complete ---")
+    system_instruction = None
+    if messages and isinstance(messages[0], dict) and messages[0].get('role') == 'system':
+        system_instruction = messages[0]['content']
+        history = messages[1:]
+    else:
+        history = messages
 
-    # --- PERIODIC SIMULATION & PROGRESSION ---
-    if turn_counter % SIMULATION_TURN_THRESHOLD == 0:
-        run_simulation_pass(db, session_id)
-        evaluate_player_growth(db, session_id)
+    gemini_history = []
+    for msg in history:
+        role = 'model' if msg['role'] == 'assistant' else 'user'
+        gemini_history.append({'role': role, 'parts': [{'text': msg['content']}]})
+
+    model = get_model(model_name=model_name, tools=tools, system_instruction=system_instruction)
+    chat = model.start_chat(history=gemini_history[:-1] if gemini_history else [])
+    
+    if not gemini_history:
+        return "No message to process."
         
-    return narration
+    response = chat.send_message(gemini_history[-1]['parts'][0]['text'])
+
+    # --- THIS IS THE FIX: Added a max_iterations counter to the loop ---
+    max_iterations = 10  # Set a reasonable limit to prevent infinite loops
+    iteration_count = 0
+    
+    while iteration_count < max_iterations:
+        # Check for tool calls
+        tool_calls = []
+        if (response.candidates and 
+            len(response.candidates) > 0 and 
+            response.candidates[0].content and
+            response.candidates[0].content.parts):
+            
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, 'function_call') and part.function_call:
+                    tool_calls.append(part.function_call)
+
+        # If there are no tool calls, exit the loop
+        if not tool_calls:
+            break
+
+        iteration_count += 1
+        api_responses = []
+
+        for tool_call in tool_calls:
+            func_name = tool_call.name
+            print(f"Model wants to call tool: {func_name} with args: {dict(tool_call.args)}")
+
+            if func_name in FUNCTION_HANDLERS:
+                func_to_call = FUNCTION_HANDLERS[func_name]
+                args = dict(tool_call.args)
+
+                if func_name not in ['select_relevant_memories']:
+                    args['db_session'] = db_session
+                    if func_name not in ['finalize_character_and_world']:
+                        args['session_id'] = session_id
+                
+                result = func_to_call(**args)
+                
+                if func_name == 'finalize_character_and_world':
+                    return result
+                
+                api_responses.append({
+                    "function_response": {
+                        "name": func_name,
+                        "response": {"result": result},
+                    }
+                })
+            else:
+                api_responses.append({
+                    "function_response": {
+                        "name": func_name,
+                        "response": {"error": "Tool not found."},
+                    }
+                })
+        
+        if api_responses:
+            response = chat.send_message(api_responses)
+        else:
+            break
+            
+    # --- THIS IS THE FIX: Check if the loop was terminated by the stopper ---
+    if iteration_count >= max_iterations:
+        error_message = f"ERROR: Loop stopper triggered after {max_iterations} iterations. The last attempted tool call was likely part of a loop. Please check the console logs for details."
+        print(error_message)
+        return error_message
+
+    # If the loop finished normally, return the AI's final text response.
+    try:
+        return response.text
+    except ValueError as e:
+        print(f"Error getting response text: {e}")
+        text_parts = []
+        for candidate in response.candidates:
+            for part in candidate.content.parts:
+                if hasattr(part, 'text') and part.text:
+                    text_parts.append(part.text)
+        return ''.join(text_parts) if text_parts else "I encountered an issue processing your request. Please try again."

@@ -5,15 +5,16 @@ from sqlalchemy.orm import Session as DBSession
 from sqlalchemy import desc
 from datetime import datetime
 
-# Adjusted imports to be more modular
+# Adjusted imports
 from prompt_builder.builder import build_prompt
 from gemini_interface.gemini_client import call_gemini_with_tools
+from gpt_interface.gpt_client import call_chat_model
 from db.schema import Turn
 from memory.ingest import chunk_and_store
-from utils.dialogue_tracker import update_conversation_context
+# We no longer need the dedicated dialogue tracker
+# from utils.dialogue_tracker import update_conversation_context
 from utils.simulation import run_simulation_pass
 from utils.progression import evaluate_player_growth
-from gpt_interface.gpt_client import call_chat_model # Retaining for low-stakes turns
 
 SIMULATION_TURN_THRESHOLD = 5
 
@@ -21,30 +22,19 @@ def run_game_turn(db: DBSession, session_id: int, player_input: str):
     """
     Runs a single turn of the game, processes player input, and returns the GM response.
     """
-    # Get the current turn number
     turn_counter = db.query(Turn).filter_by(session_id=session_id).count() + 1
     
-    # --- Dynamic Prompt Sizing Logic (from original game_loop) ---
-    is_low_stakes = len(player_input.split()) < 5
-
-    if is_low_stakes:
-        print("\n--- Low-Stakes Turn Detected ---")
-        narration = call_chat_model(
-            messages=[
-                {"role": "system", "content": "You are a game master. Briefly narrate the outcome of the player's simple action."},
-                {"role": "user", "content": f"Player action: {player_input}"}
-            ],
-            model="gpt35"
-        )
-        full_prompt = f"Low-stakes action: {player_input}" # For logging
-    else:
-        print("\n--- High-Stakes Turn Detected ---")
-        full_prompt = build_prompt(db, session_id, player_input)
-        
-        # In a web UI, we expect just the narration back. 
-        # The decision to run a simulation can be handled separately.
-        # We can simplify this call to use the gemini_client which is our main one.
-        narration = call_gemini_with_tools(db, session_id, messages=[{"role": "user", "content": full_prompt}])
+    print("\n--- Processing Turn ---")
+    full_prompt = build_prompt(db, session_id, player_input)
+    
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a cinematic, immersive AI game master. Narrate the outcome of the player's action based on the detailed context provided. Do not break character."
+        },
+        {"role": "user", "content": full_prompt}
+    ]
+    narration = call_chat_model(messages, model="gpt4o")
 
     # --- DATABASE LOGGING ---
     turn_entry = Turn(
@@ -60,19 +50,29 @@ def run_game_turn(db: DBSession, session_id: int, player_input: str):
 
     # --- MEMORY & CONTEXT ---
     chunk_and_store(f"Player: {player_input}\nGM: {narration}", session_id)
-    update_conversation_context(db, session_id, player_input, narration)
     
     # --- IMMEDIATE WORLD REACTION ---
-    if not is_low_stakes:
-        print("\n--- Checking for Immediate World Reactions ---")
-        reaction_prompt = f"""
-        The player just took an action and the GM narrated the result.
-        Player Input: "{player_input}"
-        GM Response: "{narration}"
-        Based *only* on this immediate turn, should any world state change? If so, use a tool.
-        """
-        call_gemini_with_tools(db, session_id, messages=[{"role": "user", "content": reaction_prompt}])
-        print("--- World Reaction Check Complete ---")
+    print("\n--- Checking for Immediate World Reactions ---")
+    
+    # --- FIX: Made the prompt extremely specific with function signatures ---
+    reaction_prompt = f"""
+    You are a game state manager. Based on the last turn, decide if any of the following tools need to be called.
+
+    **Last Turn:**
+    - Player Input: "{player_input}"
+    - GM Response: "{narration}"
+
+    **Available Tools:**
+    - `save_dialogue_context(npc_name: str, topic: str, dialogue_summary: str)`
+    - `update_quest_status(quest_name: str, new_status: str, reason: str)`
+    - `update_npc_status(npc_name: str, new_status: str, reason: str)`
+    - `create_rumor(rumor_content: str, is_confirmed: bool)`
+    - `set_world_flag(key: str, value: str, reason: str)`
+
+    Based on the turn, call any of the tools that are necessary. If none are needed, respond with "No immediate world state changes."
+    """
+    call_gemini_with_tools(db, session_id, messages=reaction_prompt)
+    print("--- World Reaction Check Complete ---")
 
     # --- PERIODIC SIMULATION & PROGRESSION ---
     if turn_counter % SIMULATION_TURN_THRESHOLD == 0:
